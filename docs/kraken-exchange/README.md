@@ -1,19 +1,17 @@
 # Kraken Exchange — Integration Guide
 
-## Overview
-
 Kraken is a US-headquartered cryptocurrency exchange (operated by Payward, Inc.) serving 190+ countries with 200+ assets and 600+ trading pairs. It offers strong fiat support (USD, EUR, GBP, CAD, AUD, JPY, CHF), institutional-grade API infrastructure, and a comprehensive set of order types suitable for algorithmic trading.
 
 This documentation covers everything needed to integrate Kraken into this trading platform for live, near-realtime programmatic trading. The platform is built in pure Zig with zero external dependencies.
 
-## Documentation Index
+## Documentation
 
-| Document | Contents |
-|----------|----------|
-| [REST API](rest-api.md) | All REST endpoints (public market data, private account/trading), authentication/signing, rate limits, error handling, asset naming |
-| [WebSocket API](websocket-api.md) | WebSocket v2 protocol (public & private channels), real-time market data, WebSocket trading, connection management, dead man's switch |
-| [Trading and Accounts](trading-and-accounts.md) | Account tiers, fee structure, order types, margin/leverage, futures, staking, deposits/withdrawals, security, regulatory compliance |
-| [Zig Implementation](zig-client-feasibility.md) | Pure Zig approach — std lib coverage, WebSocket implementation, SDK architecture, module structure, effort estimates |
+| # | Document | Contents |
+|---|----------|----------|
+| 1 | [REST API](01-rest-api/) | Authentication/signing, WS token, reference data, account queries, rate limits — no trading endpoints (use WebSocket) |
+| 2 | [WebSocket API](02-websocket-api/) | WebSocket v2 protocol (public & private channels), real-time market data, order execution, connection management, dead man's switch |
+| 3 | [Trading and Accounts](03-trading-and-accounts/) | Account tiers, fee structure, order types, margin/leverage, futures, staking, deposits/withdrawals, security, regulatory compliance |
+| 4 | [Zig Implementation](04-zig-implementation/) | Pure Zig approach — std lib coverage, WebSocket implementation, SDK architecture, module structure, effort estimates |
 
 ---
 
@@ -52,21 +50,21 @@ This documentation covers everything needed to integrate Kraken into this tradin
 
 2. **Kraken adapter** (`src/exchanges/kraken/`) — Kraken-specific logic:
    - HMAC-SHA512 request signing via `std.crypto`
-   - REST endpoint wrappers (public + private + trading)
-   - WebSocket v2 channel subscriptions and trading
+   - REST wrappers for auth, reference data, and account queries
+   - WebSocket v2 channel subscriptions and order execution
    - Connection management, reconnection, dead man's switch
 
-3. **WebSocket for real-time operations**:
+3. **WebSocket for all real-time operations** (primary path):
    - Subscribe to `book`, `trade`, `ticker` channels for market data
    - Subscribe to `executions` and `balances` for account state
    - Place/cancel/edit orders via WebSocket for lower latency
    - Use `cancel_all_orders_after` (dead man's switch) for safety
 
-4. **REST for non-realtime operations**:
-   - Account management (balances, ledgers, trade history)
+4. **REST for bootstrap and queries only**:
+   - WS token generation (required before authenticated WebSocket)
+   - Reference data at startup (Assets, AssetPairs, SystemStatus)
+   - Historical queries (closed orders, trade history, ledgers)
    - Report generation and export
-   - Deposit/withdrawal management
-   - Order validation (`validate=true` for dry runs)
 
 ### Key Integration Considerations
 
