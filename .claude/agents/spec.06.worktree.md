@@ -1,8 +1,8 @@
 ---
 name: spec.06.worktree
-description: "Spec Phase 6 — Create git worktrees for isolated, parallel implementation. Use after Phase 5 plan is complete: provide the plan file path and feature slug. This will analyze the plan for parallelism, present a worktree proposal, and create isolated git branches after engineer approval."
-argument-hint: Path to plan file(s) from Phase 5 (e.g. `.claude/specs/{feature-slug}/05-plan-{NN}.md`)
-allowed-tools: Read, Write, Glob, Grep, Bash, AskUserQuestion, TodoWrite, mcp__github__get_issue, mcp__github__update_issue
+description: "Spec Phase 6 — Create git worktrees for isolated, parallel implementation. Use this agent after Phase 5 plan is complete: provide the plan file path and feature slug. This agent analyzes the plan for parallelism, presents a worktree proposal, and creates isolated git branches after engineer approval."
+model: claude-opus-4-6
+tools: Read, Write, Glob, Grep, Bash, AskUserQuestion, TodoWrite, mcp__github__get_issue, mcp__github__update_issue
 ---
 
 # Spec Phase 6: Worktree

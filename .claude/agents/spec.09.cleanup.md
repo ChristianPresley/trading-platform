@@ -1,8 +1,8 @@
 ---
 name: spec.09.cleanup
-description: "Spec Phase 9 — Archive spec directory after PR is confirmed merged. Use after the PR has been merged: provide the feature slug. This verifies the PR is merged, closes any open GitHub issues, deletes feature branches, and moves spec files to a dated archive."
-argument-hint: Feature slug (e.g. `tenant-scoped-spline-reticulation`)
-allowed-tools: Read, Write, Glob, Grep, Bash, mcp__github__get_pull_request, mcp__github__list_pull_requests, mcp__github__get_issue, mcp__github__update_issue, mcp__github__add_issue_comment
+description: "Spec Phase 9 — Archive spec directory after PR is confirmed merged. Use this agent after the PR has been merged: provide the feature slug. This agent verifies the PR is merged, closes any open GitHub issues, deletes feature branches, and moves spec files to a dated archive."
+model: claude-opus-4-6
+tools: Read, Write, Glob, Grep, Bash, mcp__github__get_pull_request, mcp__github__list_pull_requests, mcp__github__get_issue, mcp__github__update_issue, mcp__github__add_issue_comment
 ---
 
 # Spec Phase 9: Cleanup

@@ -1,8 +1,8 @@
 ---
 name: spec.03.design
-description: "Spec Phase 3 — Interactive design discussion to align on what to build and how. Use after Phase 2 research is complete: provide the research file path and this will facilitate a structured design discussion, surface trade-offs, and write the design document after engineer approval."
-argument-hint: Path to research file from Phase 2 (e.g. `.claude/specs/{feature-slug}/02-research-{NN}.md`)
-allowed-tools: Read, Write, Glob, Grep, Bash, AskUserQuestion, TodoWrite, mcp__github__get_issue, mcp__github__update_issue
+description: "Spec Phase 3 — Interactive design discussion to align on what to build and how. Use this agent after Phase 2 research is complete: provide the research file path and this agent will facilitate a structured design discussion, surface trade-offs, and write the design document after engineer approval."
+model: claude-opus-4-6
+tools: Read, Write, Glob, Grep, Bash, AskUserQuestion, TodoWrite, mcp__github__get_issue, mcp__github__update_issue
 ---
 
 # Spec Phase 3: Design

@@ -1,8 +1,8 @@
 ---
 name: spec.04.outline
-description: "Spec Phase 4 — High-level structured outline: phases, ordering, testing checkpoints, key signatures. Use after Phase 3 design is approved: provide the research and design file paths and this will structure implementation into vertical slices with test checkpoints."
-argument-hint: Path to design file from Phase 3 (e.g. `.claude/specs/{feature-slug}/03-design-{NN}.md`)
-allowed-tools: Read, Write, Glob, Grep, Bash, AskUserQuestion, TodoWrite, mcp__github__get_issue, mcp__github__update_issue
+description: "Spec Phase 4 — High-level structured outline: phases, ordering, testing checkpoints, key signatures. Use this agent after Phase 3 design is approved: provide the research and design file paths and this agent will structure implementation into vertical slices with test checkpoints."
+model: claude-opus-4-6
+tools: Read, Write, Glob, Grep, Bash, AskUserQuestion, TodoWrite, mcp__github__get_issue, mcp__github__update_issue
 ---
 
 # Spec Phase 4: Outline

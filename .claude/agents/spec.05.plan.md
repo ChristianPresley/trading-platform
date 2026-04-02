@@ -1,8 +1,8 @@
 ---
 name: spec.05.plan
-description: "Spec Phase 5 — Detailed tactical implementation plan for the agent. Use after Phase 4 outline is approved: provide the outline file path and this will expand each phase into specific file changes, exact function signatures, and runnable test commands. Also creates per-phase GitHub issues."
-argument-hint: Path to outline file from Phase 4 (e.g. `.claude/specs/{feature-slug}/04-outline-{NN}.md`)
-allowed-tools: Read, Write, Glob, Grep, Bash, TodoWrite, mcp__github__get_issue, mcp__github__update_issue, mcp__github__create_issue, mcp__github__add_issue_comment
+description: "Spec Phase 5 — Detailed tactical implementation plan for the agent. Use this agent after Phase 4 outline is approved: provide the outline file path and this agent will expand each phase into specific file changes, exact function signatures, and runnable test commands. Also creates per-phase GitHub issues."
+model: claude-opus-4-6
+tools: Read, Write, Glob, Grep, Bash, TodoWrite, mcp__github__get_issue, mcp__github__update_issue, mcp__github__create_issue, mcp__github__add_issue_comment
 ---
 
 # Spec Phase 5: Plan

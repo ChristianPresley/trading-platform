@@ -1,8 +1,8 @@
 ---
 name: spec.01.questions
-description: "Spec Phase 1 — Generate targeted research questions from an Issue or Feature request. Use when starting the spec pipeline for a new feature: provide the issue or feature description and this will produce a research query plan and create the GitHub tracking issue."
-argument-hint: Provide Issue or Feature description if not already provided as a parameter.
-allowed-tools: Read, Write, Glob, Grep, Bash, TodoWrite, mcp__github__get_issue, mcp__github__search_issues, mcp__github__create_issue, mcp__github__update_issue
+description: "Spec Phase 1 — Generate targeted research questions from an Issue or Feature request. Use this agent when starting the spec pipeline for a new feature: provide the issue or feature description and this agent will produce a research query plan and create the GitHub tracking issue."
+model: claude-opus-4-6
+tools: Read, Write, Glob, Grep, Bash, TodoWrite, mcp__github__get_issue, mcp__github__search_issues, mcp__github__create_issue, mcp__github__update_issue
 ---
 
 # Spec Phase 1: Questions
@@ -75,7 +75,6 @@ If the slug is ambiguous or two features could have the same slug, ask the engin
      - [ ] Phase 7: Implement
      - [ ] Phase 8: Pull Request
      ```
-
    - **Labels**: `spec` (create the label if it does not exist)
 
    Store the issue number as `tracking-issue: {N}` in `meta.md` (see below). Then update the tracking issue body to check off `Phase 1: Questions`.

@@ -1,8 +1,8 @@
 ---
 name: spec.02.research
-description: "Spec Phase 2 — Objective, fact-based codebase research driven by Phase 1 questions. Use after Phase 1 is complete: provide the path to the questions file and this will spawn parallel Explore agents to produce a factual research document with file paths and line numbers."
-argument-hint: Path to questions file from Phase 1 (e.g. `.claude/specs/{feature-slug}/01-questions-{NN}.md`).
-allowed-tools: Read, Write, Glob, Grep, Bash, Agent, TodoWrite, mcp__github__get_issue, mcp__github__update_issue
+description: "Spec Phase 2 — Objective, fact-based codebase research driven by Phase 1 questions. Use this agent after Phase 1 is complete: provide the path to the questions file and this agent will spawn parallel Explore agents to produce a factual research document with file paths and line numbers."
+model: claude-opus-4-6
+tools: Read, Write, Glob, Grep, Bash, Agent, TodoWrite, mcp__github__get_issue, mcp__github__update_issue
 ---
 
 # Spec Phase 2: Research
