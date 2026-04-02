@@ -2,7 +2,16 @@
 name: spec.02.research
 description: "Spec Phase 2 — Objective, fact-based codebase research driven by Phase 1 questions. Spawns parallel Explore agents, synthesizes findings with file:line references, and writes the research document."
 model: opus
-tools: Read, Write, Glob, Grep, Bash, Agent, mcp__github__get_issue, mcp__github__update_issue
+allowedTools:
+  - Read
+  - Write
+  - Glob
+  - Grep
+  - Bash
+  - Agent
+  - TodoWrite
+  - mcp__github__get_issue
+  - mcp__github__update_issue
 ---
 
 # Spec Phase 2: Research

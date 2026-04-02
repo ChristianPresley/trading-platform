@@ -2,7 +2,17 @@
 name: spec.01.questions
 description: "Spec Phase 1 — Generate targeted research questions from an Issue or Feature request. Accepts feature description as input, derives slug, writes questions file, and creates GitHub tracking issue."
 model: opus
-tools: Read, Write, Glob, Grep, Bash, mcp__github__get_issue, mcp__github__search_issues, mcp__github__create_issue, mcp__github__update_issue
+allowedTools:
+  - Read
+  - Write
+  - Glob
+  - Grep
+  - Bash
+  - TodoWrite
+  - mcp__github__get_issue
+  - mcp__github__search_issues
+  - mcp__github__create_issue
+  - mcp__github__update_issue
 ---
 
 # Spec Phase 1: Questions

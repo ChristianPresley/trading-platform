@@ -1,6 +1,6 @@
 ---
 name: spec.00.overview
-description: "Spec Pipeline — Overview of all 8 phases and how to invoke them in sequence. Use when the user wants to understand the spec pipeline, see the phase map, or get guidance on which phase to run next."
+description: "Spec Pipeline — Overview of all 9 phases and how to invoke them in sequence. Use when the user wants to understand the spec pipeline, see the phase map, or get guidance on which phase to run next."
 argument-hint: Optional feature description to get phase-specific guidance.
 allowed-tools: Read, Glob
 ---

@@ -2,7 +2,21 @@
 name: spec.08.pull-request
 description: "Spec Phase 8 — Create a pull request with thorough description from the full pipeline history. Reads design, plan, and implementation log to generate PR context. Creates or updates the PR via gh."
 model: sonnet
-tools: Read, Write, Edit, Glob, Grep, Bash, mcp__github__get_issue, mcp__github__update_issue, mcp__github__add_issue_comment, mcp__github__create_pull_request, mcp__github__get_pull_request, mcp__github__get_pull_request_files, mcp__github__create_pull_request_review
+allowedTools:
+  - Read
+  - Write
+  - Edit
+  - Glob
+  - Grep
+  - Bash
+  - TodoWrite
+  - mcp__github__get_issue
+  - mcp__github__update_issue
+  - mcp__github__add_issue_comment
+  - mcp__github__create_pull_request
+  - mcp__github__get_pull_request
+  - mcp__github__get_pull_request_files
+  - mcp__github__create_pull_request_review
 ---
 
 # Spec Phase 8: Pull Request

@@ -2,7 +2,21 @@
 name: spec.07.implement
 description: "Spec Phase 7 — Autonomous implementation orchestrator. Spawns spec.07.worker sub-agents per worktree, enforces test checkpoints with auto-recovery, auto-merges batches, and only escalates genuine blockers."
 model: opus
-tools: Read, Write, Edit, Glob, Grep, Bash, Agent, WebSearch, WebFetch, AskUserQuestion, mcp__github__get_issue, mcp__github__update_issue, mcp__github__add_issue_comment
+allowedTools:
+  - Read
+  - Write
+  - Edit
+  - Glob
+  - Grep
+  - Bash
+  - Agent
+  - WebSearch
+  - WebFetch
+  - AskUserQuestion
+  - TodoWrite
+  - mcp__github__get_issue
+  - mcp__github__update_issue
+  - mcp__github__add_issue_comment
 ---
 
 # Spec Phase 7: Implement

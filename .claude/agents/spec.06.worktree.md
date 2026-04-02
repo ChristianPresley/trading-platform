@@ -2,7 +2,16 @@
 name: spec.06.worktree
 description: "Spec Phase 6 — Analyze plan for parallelism, create isolated git worktrees for independent phases. Gets engineer approval before modifying git state."
 model: sonnet
-tools: Read, Write, Glob, Grep, Bash, AskUserQuestion, mcp__github__get_issue, mcp__github__update_issue
+allowedTools:
+  - Read
+  - Write
+  - Glob
+  - Grep
+  - Bash
+  - AskUserQuestion
+  - TodoWrite
+  - mcp__github__get_issue
+  - mcp__github__update_issue
 ---
 
 # Spec Phase 6: Worktree

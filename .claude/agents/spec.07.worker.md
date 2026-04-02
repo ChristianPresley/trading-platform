@@ -2,7 +2,15 @@
 name: spec.07.worker
 description: "Spec Phase 7 worker — Implementation sub-agent spawned by spec.07.implement. Executes assigned phases in a worktree, runs test checkpoints, commits changes. Does not interact with the user."
 model: sonnet
-tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch
+allowedTools:
+  - Read
+  - Write
+  - Edit
+  - Glob
+  - Grep
+  - Bash
+  - WebSearch
+  - WebFetch
 ---
 
 # Spec Phase 7: Implementation Worker

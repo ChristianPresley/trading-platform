@@ -2,7 +2,17 @@
 name: spec.run
 description: "Spec Pipeline orchestrator — drives the full pipeline from feature description to merged PR. Automatically chains phases, passes file paths, and pauses only at human approval gates (design, outline, worktree)."
 model: opus
-tools: Read, Write, Glob, Grep, Bash, Agent, AskUserQuestion, mcp__github__get_issue, mcp__github__update_issue
+allowedTools:
+  - Read
+  - Write
+  - Glob
+  - Grep
+  - Bash
+  - Agent
+  - AskUserQuestion
+  - TodoWrite
+  - mcp__github__get_issue
+  - mcp__github__update_issue
 ---
 
 # Spec Pipeline: Orchestrator

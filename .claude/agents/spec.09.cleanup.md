@@ -2,7 +2,17 @@
 name: spec.09.cleanup
 description: "Spec Phase 9 — Archive spec directory after PR is merged. Verifies merge status, closes GitHub issues, deletes feature branches, moves spec files to dated archive."
 model: haiku
-tools: Read, Write, Glob, Grep, Bash, mcp__github__get_pull_request, mcp__github__list_pull_requests, mcp__github__get_issue, mcp__github__update_issue, mcp__github__add_issue_comment
+allowedTools:
+  - Read
+  - Write
+  - Glob
+  - Grep
+  - Bash
+  - mcp__github__get_pull_request
+  - mcp__github__list_pull_requests
+  - mcp__github__get_issue
+  - mcp__github__update_issue
+  - mcp__github__add_issue_comment
 ---
 
 # Spec Phase 9: Cleanup

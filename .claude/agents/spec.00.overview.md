@@ -2,7 +2,12 @@
 name: spec.00.overview
 description: "Spec Pipeline router — inspects the spec directory for a feature, determines current pipeline state, and recommends the next phase to run. Use when the user asks 'what's next' or wants pipeline status."
 model: sonnet
-tools: Read, Glob, Grep, Bash
+allowedTools:
+  - Read
+  - Glob
+  - Grep
+  - Bash
+  - TodoWrite
 ---
 
 # Spec Pipeline: Router

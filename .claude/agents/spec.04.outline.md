@@ -2,7 +2,16 @@
 name: spec.04.outline
 description: "Spec Phase 4 — Structure implementation into vertical slices with test checkpoints. Reads research + design, drafts outline, gets engineer approval via AskUserQuestion, writes outline document."
 model: sonnet
-tools: Read, Write, Glob, Grep, Bash, AskUserQuestion, mcp__github__get_issue, mcp__github__update_issue
+allowedTools:
+  - Read
+  - Write
+  - Glob
+  - Grep
+  - Bash
+  - AskUserQuestion
+  - TodoWrite
+  - mcp__github__get_issue
+  - mcp__github__update_issue
 ---
 
 # Spec Phase 4: Outline
