@@ -1,6 +1,6 @@
 ---
 name: spec.08.pull-request
-description: "Spec Phase 8 — Create a pull request with title, description, and context from the full pipeline"
+description: "Spec Phase 8 — Create a pull request with title, description, and context from the full pipeline. Use after Phase 7 implementation is complete: provide the implementation log file path. This reads the full pipeline history to generate a thorough PR description and creates the PR via gh."
 argument-hint: Path to implementation log from Phase 7 (e.g. `.claude/specs/{feature-slug}/07-implementation-{NN}.md`)
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, TodoWrite, mcp__github__get_issue, mcp__github__update_issue, mcp__github__add_issue_comment, mcp__github__create_pull_request, mcp__github__get_pull_request, mcp__github__get_pull_request_files, mcp__github__create_pull_request_review
 ---

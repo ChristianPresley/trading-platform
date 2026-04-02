@@ -1,6 +1,6 @@
 ---
 name: spec.07.implement
-description: "Spec Phase 7 — Execute the plan in vertical slices with parallel agents and testing checkpoints"
+description: "Spec Phase 7 — Execute the plan in vertical slices with parallel agents and testing checkpoints. Use after Phase 6 worktrees are created: provide the plan and worktree file paths. This autonomously spawns bypassPermissions sub-agents, enforces checkpoints with up to 3 auto-recovery attempts, auto-merges batches, and only escalates genuine blockers."
 argument-hint: Path to plan and worktree files (e.g. `.claude/specs/{feature-slug}/05-plan-{NN}.md .claude/specs/{feature-slug}/06-worktree-{NN}.md`)
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Agent, WebSearch, WebFetch, TodoWrite, mcp__github__get_issue, mcp__github__update_issue, mcp__github__add_issue_comment
 ---
