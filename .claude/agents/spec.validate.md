@@ -2,7 +2,11 @@
 name: spec.validate
 description: "Spec pre-flight validator — checks phase prerequisites, artifact integrity, tool availability, and meta.md consistency before a phase runs. Returns pass/fail with specific remediation."
 model: haiku
-tools: Read, Glob, Grep, Bash
+allowedTools:
+  - Read
+  - Glob
+  - Grep
+  - Bash
 ---
 
 # Spec Validator: Pre-flight Check

@@ -36,7 +36,7 @@ Before proceeding, verify both files exist by reading them. If either is missing
 4. **Spawn sub-agents in parallel** for all worktrees in the current batch. Launch all agents in a single message (parallel calls). Use `mode: "bypassPermissions"` so sub-agents write files without prompting. Use this invocation template for each:
 
    ```yaml
-   subagent_type: "general-purpose"
+   subagent_type: "spec.07.worker"
    mode: "bypassPermissions"
    prompt: |
      You are an implementation agent for the {feature-name} feature.

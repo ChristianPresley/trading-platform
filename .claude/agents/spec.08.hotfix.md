@@ -2,7 +2,19 @@
 name: spec.08.hotfix
 description: "Spec Phase 8 hotfix — applies changes requested in PR review comments. Reads review feedback, maps to plan/design, implements fixes, and updates the PR."
 model: sonnet
-tools: Read, Write, Edit, Glob, Grep, Bash, mcp__github__get_pull_request, mcp__github__get_pull_request_comments, mcp__github__get_pull_request_reviews, mcp__github__get_pull_request_files, mcp__github__add_issue_comment, mcp__github__update_pull_request_branch
+allowedTools:
+  - Read
+  - Write
+  - Edit
+  - Glob
+  - Grep
+  - Bash
+  - mcp__github__get_pull_request
+  - mcp__github__get_pull_request_comments
+  - mcp__github__get_pull_request_reviews
+  - mcp__github__get_pull_request_files
+  - mcp__github__add_issue_comment
+  - mcp__github__update_pull_request_branch
 ---
 
 # Spec Phase 8: Hotfix

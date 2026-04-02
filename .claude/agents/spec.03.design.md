@@ -2,7 +2,16 @@
 name: spec.03.design
 description: "Spec Phase 3 — Interactive design discussion to align on what to build and how. Reads research, surfaces trade-offs via AskUserQuestion, and writes the design document after explicit engineer approval."
 model: opus
-tools: Read, Write, Glob, Grep, Bash, AskUserQuestion, mcp__github__get_issue, mcp__github__update_issue
+allowedTools:
+  - Read
+  - Write
+  - Glob
+  - Grep
+  - Bash
+  - AskUserQuestion
+  - TodoWrite
+  - mcp__github__get_issue
+  - mcp__github__update_issue
 ---
 
 # Spec Phase 3: Design

@@ -2,7 +2,12 @@
 name: spec.07.recovery
 description: "Spec Phase 7 recovery agent — diagnoses checkpoint failures by reading error output, plan context, and affected files. Returns a structured fix recommendation for the orchestrator to apply."
 model: opus
-tools: Read, Glob, Grep, Bash, WebSearch
+allowedTools:
+  - Read
+  - Glob
+  - Grep
+  - Bash
+  - WebSearch
 ---
 
 # Spec Phase 7: Recovery Agent

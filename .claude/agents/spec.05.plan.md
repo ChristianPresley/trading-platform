@@ -2,7 +2,17 @@
 name: spec.05.plan
 description: "Spec Phase 5 — Expand outline into detailed implementation plan with specific file changes, function signatures, test commands, and per-phase GitHub issues."
 model: opus
-tools: Read, Write, Glob, Grep, Bash, mcp__github__get_issue, mcp__github__update_issue, mcp__github__create_issue, mcp__github__add_issue_comment
+allowedTools:
+  - Read
+  - Write
+  - Glob
+  - Grep
+  - Bash
+  - TodoWrite
+  - mcp__github__get_issue
+  - mcp__github__update_issue
+  - mcp__github__create_issue
+  - mcp__github__add_issue_comment
 ---
 
 # Spec Phase 5: Plan
