@@ -36,6 +36,11 @@ pub const Renderer = struct {
         self.writeRaw("\x1b[2J") catch {}; // clear screen
     }
 
+    /// Write raw bytes to frame buffer (public version, silently ignores overflow).
+    pub fn writeRawPub(self: *Renderer, data: []const u8) void {
+        self.writeRaw(data) catch {};
+    }
+
     /// Write raw bytes to frame buffer.
     fn writeRaw(self: *Renderer, data: []const u8) !void {
         if (self.cursor + data.len > self.buf.len) return error.BufferFull;

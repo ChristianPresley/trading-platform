@@ -12,14 +12,25 @@ const PositionUpdate = msg.PositionUpdate;
 const OrderUpdate = msg.OrderUpdate;
 const StatusUpdate = msg.StatusUpdate;
 const Engine = @import("engine.zig").Engine;
+const input_mod = @import("input.zig");
+const InputHandler = input_mod.InputHandler;
+const Action = input_mod.Action;
 
 const orderbook_panel = @import("panels/orderbook_panel.zig");
 const positions_panel = @import("panels/positions_panel.zig");
 const orders_panel = @import("panels/orders_panel.zig");
 const status_panel = @import("panels/status_panel.zig");
+const order_entry_panel_mod = @import("panels/order_entry_panel.zig");
+const OrderEntryPanel = order_entry_panel_mod.OrderEntryPanel;
 
 const MAX_POSITIONS = 16;
 const MAX_ORDERS = 64;
+
+// Panel indices
+const PANEL_ORDERBOOK = 0;
+const PANEL_POSITIONS = 1;
+const PANEL_ORDER_ENTRY = 2;
+const PANEL_RECENT_ORDERS = 3;
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -64,6 +75,20 @@ pub fn main() !void {
     var engine_stopped = false;
     var ticks_since_event: u32 = 0;
 
+    // Input and focus state
+    var input_handler = InputHandler.init();
+    var active_panel: u8 = PANEL_ORDERBOOK;
+    var order_entry = OrderEntryPanel.init("BTC-USD");
+    var status_msg: [64]u8 = undefined;
+    var status_msg_len: usize = 0;
+    var status_msg_frames: u32 = 0; // frames remaining to show status message
+
+    // Orderbook and orders panel scroll positions (reserved for future use)
+    const orderbook_scroll: i32 = 0;
+    const orders_scroll: i32 = 0;
+    _ = orderbook_scroll;
+    _ = orders_scroll;
+
     while (!terminal_mod.signal_received) {
         // Check for resize
         const new_size = Terminal.getSize() catch size;
@@ -80,7 +105,6 @@ pub fn main() !void {
             switch (event) {
                 .tick => {},
                 .orderbook_snapshot => |snap| {
-                    // Match by instrument name to slot
                     for (0..2) |i| {
                         if (std.mem.eql(u8, snap.instrument.slice(), orderbook_snap[i].instrument.slice()) or
                             orderbook_snap[i].bid_count == 0)
@@ -91,7 +115,6 @@ pub fn main() !void {
                     }
                 },
                 .position_update => |pu| {
-                    // Upsert by instrument
                     var found = false;
                     for (0..positions_count) |i| {
                         if (std.mem.eql(u8, positions_buf[i].instrument.slice(), pu.instrument.slice())) {
@@ -106,7 +129,6 @@ pub fn main() !void {
                     }
                 },
                 .order_update => |ou| {
-                    // Append or update
                     var found = false;
                     for (0..orders_count) |i| {
                         if (orders_buf[i].id == ou.id) {
@@ -120,7 +142,6 @@ pub fn main() !void {
                             orders_buf[orders_count] = ou;
                             orders_count += 1;
                         } else {
-                            // Ring: shift left, append at end
                             for (0..MAX_ORDERS - 1) |i| orders_buf[i] = orders_buf[i + 1];
                             orders_buf[MAX_ORDERS - 1] = ou;
                         }
@@ -141,53 +162,155 @@ pub fn main() !void {
             engine_stopped = true;
         }
 
+        // Countdown status message
+        if (status_msg_frames > 0) status_msg_frames -= 1;
+
         const panels = layout_mod.compute(size);
 
         // Render frame
         renderer.beginFrame();
 
-        // Orderbook panel
+        // Orderbook panel (highlight if active)
+        if (active_panel == PANEL_ORDERBOOK) {
+            renderer.writeRawPub("\x1b[1m");
+        }
         orderbook_panel.draw(&renderer, panels.orderbook, &orderbook_snap[active_instrument]);
+        if (active_panel == PANEL_ORDERBOOK) {
+            renderer.writeRawPub("\x1b[0m");
+        }
 
         // Positions panel
+        if (active_panel == PANEL_POSITIONS) renderer.writeRawPub("\x1b[1m");
         positions_panel.draw(&renderer, panels.positions, positions_buf[0..positions_count]);
+        if (active_panel == PANEL_POSITIONS) renderer.writeRawPub("\x1b[0m");
 
-        // Order entry panel (placeholder for now — Phase 6 will add full entry)
-        renderer.drawBox(panels.order_entry, "Order Entry");
-        renderer.drawText(panels.order_entry.x + 1, panels.order_entry.y + 1, "Tab to focus | Enter to submit");
+        // Order entry panel
+        order_entry.draw(&renderer, panels.order_entry, active_panel == PANEL_ORDER_ENTRY);
 
         // Recent orders panel
+        if (active_panel == PANEL_RECENT_ORDERS) renderer.writeRawPub("\x1b[1m");
         orders_panel.draw(&renderer, panels.recent_orders, orders_buf[0..orders_count]);
+        if (active_panel == PANEL_RECENT_ORDERS) renderer.writeRawPub("\x1b[0m");
 
         // Status bar
-        if (engine_stopped) {
-            renderer.drawText(panels.status_bar.x, panels.status_bar.y, "Engine stopped | q=quit");
+        if (status_msg_frames > 0) {
+            renderer.writeFmt("\x1b[{d};{d}H{s}", .{
+                panels.status_bar.y + 1, panels.status_bar.x + 1,
+                status_msg[0..status_msg_len],
+            });
+        } else if (engine_stopped) {
+            renderer.drawText(panels.status_bar.x, panels.status_bar.y, "Engine stopped | q=quit | Tab=switch panel");
         } else {
             status_panel.draw(&renderer, panels.status_bar, &latest_status);
         }
 
         try renderer.endFrame();
 
-        // Check input
-        if (term.readByte()) |byte| {
-            switch (byte) {
-                'q' => {
+        // Process frame boundary escape reset
+        if (input_handler.frameReset()) |act| {
+            _ = processAction(&input_handler, act, &active_panel, &active_instrument, &order_entry,
+                &from_tui, &status_msg, &status_msg_len, &status_msg_frames);
+        }
+
+        // Process input bytes
+        while (term.readByte()) |byte| {
+            const text_mode = (active_panel == PANEL_ORDER_ENTRY);
+            if (input_handler.feed(byte, text_mode)) |act| {
+                const should_quit = processAction(&input_handler, act, &active_panel, &active_instrument,
+                    &order_entry, &from_tui, &status_msg, &status_msg_len, &status_msg_frames);
+                if (should_quit) {
                     _ = from_tui.push(UserCommand{ .quit = {} });
+                    goto_done = true;
                     break;
-                },
-                'i' => {
-                    // Toggle active instrument
-                    active_instrument = (active_instrument + 1) % 2;
-                },
-                else => {},
+                }
             }
         }
+
+        if (goto_done) break;
 
         std.Thread.sleep(66_000_000); // ~15 FPS
     }
 
     // Wait for engine thread
     engine_thread.join();
+}
+
+var goto_done: bool = false;
+
+/// Process a decoded action. Returns true if the app should quit.
+fn processAction(
+    _handler: *InputHandler,
+    action: Action,
+    active_panel: *u8,
+    active_instrument: *usize,
+    order_entry: *OrderEntryPanel,
+    from_tui: *SpscRingBuffer(UserCommand),
+    status_msg: *[64]u8,
+    status_msg_len: *usize,
+    status_msg_frames: *u32,
+) bool {
+    _ = _handler;
+    switch (action) {
+        .quit => {
+            if (active_panel.* != PANEL_ORDER_ENTRY) {
+                return true;
+            }
+            // In order entry, Escape exits focus
+            active_panel.* = PANEL_ORDERBOOK;
+        },
+        .escape => {
+            if (active_panel.* == PANEL_ORDER_ENTRY) {
+                active_panel.* = PANEL_ORDERBOOK;
+            }
+        },
+        .tab => {
+            active_panel.* = (active_panel.* + 1) % 4;
+        },
+        .shift_tab => {
+            if (active_panel.* == 0) {
+                active_panel.* = 3;
+            } else {
+                active_panel.* -= 1;
+            }
+        },
+        .char => |c| {
+            if (active_panel.* == PANEL_ORDER_ENTRY) {
+                _ = order_entry.handleAction(action);
+            } else if (c == 'i') {
+                // Toggle instrument in orderbook panel
+                active_instrument.* = (active_instrument.* + 1) % 2;
+            }
+        },
+        .arrow_up, .arrow_down => {
+            if (active_panel.* == PANEL_ORDER_ENTRY) {
+                _ = order_entry.handleAction(action);
+            }
+        },
+        .enter => {
+            if (active_panel.* == PANEL_ORDER_ENTRY) {
+                if (order_entry.handleAction(action)) |cmd| {
+                    if (from_tui.push(cmd)) {
+                        const s = "Order submitted";
+                        @memcpy(status_msg[0..s.len], s);
+                        status_msg_len.* = s.len;
+                        status_msg_frames.* = 45; // ~3 seconds at 15fps
+                    }
+                }
+            }
+        },
+        .backspace => {
+            if (active_panel.* == PANEL_ORDER_ENTRY) {
+                _ = order_entry.handleAction(action);
+            }
+        },
+        .delete_line => {
+            if (active_panel.* == PANEL_ORDER_ENTRY) {
+                _ = order_entry.handleAction(action);
+            }
+        },
+        else => {},
+    }
+    return false;
 }
 
 test "desk_smoke" {}
