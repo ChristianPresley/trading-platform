@@ -115,20 +115,82 @@ pub fn build(b: *std.Build) void {
 
     _ = addCoreTest;
 
+    // Event store tests (sdk/core)
+    const core_event_store_tests = b.addTest(.{
+        .name = "event_store_test",
+        .root_source_file = b.path("sdk/core/tests/event_store_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    core_event_store_tests.root_module.addAnonymousImport("event_store", .{
+        .root_source_file = b.path("sdk/core/event_store.zig"),
+    });
+
+    // Domain modules
+    const order_types_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/domain/order_types.zig"),
+    });
+    const oms_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/domain/oms.zig"),
+    });
+    oms_mod.addImport("order_types", order_types_mod);
+
+    const pre_trade_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/domain/risk/pre_trade.zig"),
+    });
+    pre_trade_mod.addImport("oms", oms_mod);
+
+    // Domain tests: OMS
+    const domain_oms_tests = b.addTest(.{
+        .name = "oms_test",
+        .root_source_file = b.path("sdk/domain/tests/oms_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    domain_oms_tests.root_module.addImport("oms", oms_mod);
+
+    // Domain tests: order_types
+    const domain_order_types_tests = b.addTest(.{
+        .name = "order_types_test",
+        .root_source_file = b.path("sdk/domain/tests/order_types_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    domain_order_types_tests.root_module.addImport("order_types", order_types_mod);
+
+    // Domain tests: risk/pre_trade
+    const domain_risk_tests = b.addTest(.{
+        .name = "risk_test",
+        .root_source_file = b.path("sdk/domain/tests/risk_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    domain_risk_tests.root_module.addImport("pre_trade", pre_trade_mod);
+    domain_risk_tests.root_module.addImport("oms", oms_mod);
+
     const run_memory_tests = b.addRunArtifact(core_memory_tests);
     const run_time_tests = b.addRunArtifact(core_time_tests);
     const run_containers_tests = b.addRunArtifact(core_containers_tests);
     const run_crypto_tests = b.addRunArtifact(core_crypto_tests);
+    const run_event_store_tests = b.addRunArtifact(core_event_store_tests);
+    const run_oms_tests = b.addRunArtifact(domain_oms_tests);
+    const run_order_types_tests = b.addRunArtifact(domain_order_types_tests);
+    const run_risk_tests = b.addRunArtifact(domain_risk_tests);
 
     test_step.dependOn(&run_memory_tests.step);
     test_step.dependOn(&run_time_tests.step);
     test_step.dependOn(&run_containers_tests.step);
     test_step.dependOn(&run_crypto_tests.step);
+    test_step.dependOn(&run_event_store_tests.step);
+    test_step.dependOn(&run_oms_tests.step);
+    test_step.dependOn(&run_order_types_tests.step);
+    test_step.dependOn(&run_risk_tests.step);
 
     test_core_step.dependOn(&run_memory_tests.step);
     test_core_step.dependOn(&run_time_tests.step);
     test_core_step.dependOn(&run_containers_tests.step);
     test_core_step.dependOn(&run_crypto_tests.step);
+    test_core_step.dependOn(&run_event_store_tests.step);
 
     // ---- sdk/protocol tests ----
     const test_protocol_step = b.step("test-protocol", "Run sdk/protocol tests");
