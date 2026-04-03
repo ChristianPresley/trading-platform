@@ -338,4 +338,135 @@ pub fn build(b: *std.Build) void {
     test_protocol_step.dependOn(&run_fast_tests.step);
     test_protocol_step.dependOn(&run_ouch_tests.step);
     test_protocol_step.dependOn(&run_pitch_tests.step);
+
+    // ---- Phase 3: WebSocket + Kraken REST ----
+    const test_ws_step = b.step("test-ws", "Run WebSocket tests");
+    const test_kraken_step = b.step("test-kraken", "Run Kraken exchange tests");
+
+    // WebSocket frame module
+    const ws_frame_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/protocol/websocket/frame.zig"),
+    });
+
+    // WebSocket frame tests
+    const ws_frame_tests = b.addTest(.{
+        .name = "frame_test",
+        .root_source_file = b.path("sdk/protocol/websocket/tests/frame_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    ws_frame_tests.root_module.addImport("frame", ws_frame_mod);
+
+    // Kraken spot auth module
+    const spot_auth_mod = b.createModule(.{
+        .root_source_file = b.path("exchanges/kraken/spot/auth.zig"),
+    });
+    spot_auth_mod.addImport("hmac", hmac_mod);
+    spot_auth_mod.addImport("base64", base64_mod);
+
+    // Kraken spot rate limiter module
+    const spot_rate_limiter_mod = b.createModule(.{
+        .root_source_file = b.path("exchanges/kraken/spot/rate_limiter.zig"),
+    });
+
+    // Kraken spot types module
+    const spot_types_mod = b.createModule(.{
+        .root_source_file = b.path("exchanges/kraken/spot/types.zig"),
+    });
+
+    // Kraken spot rest_client module
+    const spot_rest_client_mod = b.createModule(.{
+        .root_source_file = b.path("exchanges/kraken/spot/rest_client.zig"),
+    });
+    spot_rest_client_mod.addImport("http_client", http_client_mod);
+    spot_rest_client_mod.addImport("json", json_mod);
+    spot_rest_client_mod.addImport("spot_auth", spot_auth_mod);
+    spot_rest_client_mod.addImport("spot_types", spot_types_mod);
+
+    // Kraken futures auth module
+    const futures_auth_mod = b.createModule(.{
+        .root_source_file = b.path("exchanges/kraken/futures/auth.zig"),
+    });
+    futures_auth_mod.addImport("hmac", hmac_mod);
+    futures_auth_mod.addImport("base64", base64_mod);
+
+    // Kraken futures rate limiter module
+    const futures_rate_limiter_mod = b.createModule(.{
+        .root_source_file = b.path("exchanges/kraken/futures/rate_limiter.zig"),
+    });
+    // futures_rate_limiter_mod is available for test steps that import it
+    _ = futures_rate_limiter_mod;
+
+    // Kraken futures types module
+    const futures_types_mod = b.createModule(.{
+        .root_source_file = b.path("exchanges/kraken/futures/types.zig"),
+    });
+
+    // Kraken futures rest_client module
+    const futures_rest_client_mod = b.createModule(.{
+        .root_source_file = b.path("exchanges/kraken/futures/rest_client.zig"),
+    });
+    futures_rest_client_mod.addImport("http_client", http_client_mod);
+    futures_rest_client_mod.addImport("json", json_mod);
+    futures_rest_client_mod.addImport("futures_auth", futures_auth_mod);
+    futures_rest_client_mod.addImport("futures_types", futures_types_mod);
+
+    // Kraken spot auth tests
+    const kraken_spot_auth_tests = b.addTest(.{
+        .name = "kraken_spot_auth_test",
+        .root_source_file = b.path("exchanges/kraken/spot/tests/auth_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    kraken_spot_auth_tests.root_module.addImport("spot_auth", spot_auth_mod);
+    kraken_spot_auth_tests.root_module.addImport("base64", base64_mod);
+    kraken_spot_auth_tests.root_module.addImport("hmac", hmac_mod);
+
+    // Kraken spot rate limiter tests
+    const kraken_spot_rate_limiter_tests = b.addTest(.{
+        .name = "kraken_spot_rate_limiter_test",
+        .root_source_file = b.path("exchanges/kraken/spot/tests/rate_limiter_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    kraken_spot_rate_limiter_tests.root_module.addImport("spot_rate_limiter", spot_rate_limiter_mod);
+
+    // Kraken spot rest_client tests (JSON parsing only, no network)
+    const kraken_spot_rest_tests = b.addTest(.{
+        .name = "kraken_spot_rest_test",
+        .root_source_file = b.path("exchanges/kraken/spot/tests/rest_client_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    kraken_spot_rest_tests.root_module.addImport("json", json_mod);
+
+    // Kraken futures auth tests
+    const kraken_futures_auth_tests = b.addTest(.{
+        .name = "kraken_futures_auth_test",
+        .root_source_file = b.path("exchanges/kraken/futures/tests/auth_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    kraken_futures_auth_tests.root_module.addImport("futures_auth", futures_auth_mod);
+    kraken_futures_auth_tests.root_module.addImport("base64", base64_mod);
+    kraken_futures_auth_tests.root_module.addImport("hmac", hmac_mod);
+
+    const run_ws_frame_tests = b.addRunArtifact(ws_frame_tests);
+    const run_kraken_spot_auth_tests = b.addRunArtifact(kraken_spot_auth_tests);
+    const run_kraken_spot_rate_limiter_tests = b.addRunArtifact(kraken_spot_rate_limiter_tests);
+    const run_kraken_spot_rest_tests = b.addRunArtifact(kraken_spot_rest_tests);
+    const run_kraken_futures_auth_tests = b.addRunArtifact(kraken_futures_auth_tests);
+
+    test_step.dependOn(&run_ws_frame_tests.step);
+    test_step.dependOn(&run_kraken_spot_auth_tests.step);
+    test_step.dependOn(&run_kraken_spot_rate_limiter_tests.step);
+    test_step.dependOn(&run_kraken_spot_rest_tests.step);
+    test_step.dependOn(&run_kraken_futures_auth_tests.step);
+
+    test_ws_step.dependOn(&run_ws_frame_tests.step);
+
+    test_kraken_step.dependOn(&run_kraken_spot_auth_tests.step);
+    test_kraken_step.dependOn(&run_kraken_spot_rate_limiter_tests.step);
+    test_kraken_step.dependOn(&run_kraken_spot_rest_tests.step);
+    test_kraken_step.dependOn(&run_kraken_futures_auth_tests.step);
 }
