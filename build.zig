@@ -969,4 +969,76 @@ pub fn build(b: *std.Build) void {
     test_kraken_step.dependOn(&run_kraken_symbol_translator_tests.step);
     test_kraken_step.dependOn(&run_kraken_spot_executor_tests.step);
     test_kraken_step.dependOn(&run_kraken_futures_executor_tests.step);
+
+    // ---- Trading Desk TUI executable ----
+
+    // SDK core modules (not previously defined as build modules)
+    const memory_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/core/memory.zig"),
+    });
+    const time_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/core/time.zig"),
+    });
+    const ring_buffer_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/core/containers/ring_buffer.zig"),
+    });
+    const thread_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/core/io/thread.zig"),
+    });
+
+    // Desk executable
+    const desk_exe = b.addExecutable(.{
+        .name = "desk",
+        .root_source_file = b.path("trading/desk/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    desk_exe.root_module.addImport("orderbook", orderbook_mod);
+    desk_exe.root_module.addImport("oms", oms_mod);
+    desk_exe.root_module.addImport("order_types", order_types_mod);
+    desk_exe.root_module.addImport("positions", positions_mod);
+    desk_exe.root_module.addImport("pre_trade", pre_trade_mod);
+    desk_exe.root_module.addImport("memory", memory_mod);
+    desk_exe.root_module.addImport("time", time_mod);
+    desk_exe.root_module.addImport("ring_buffer", ring_buffer_mod);
+    desk_exe.root_module.addImport("thread", thread_mod);
+    desk_exe.root_module.addImport("spot_executor", spot_executor_mod);
+    b.installArtifact(desk_exe);
+
+    // Build steps for desk
+    // build-desk: compile the desk executable
+    const build_desk_step = b.step("build-desk", "Build the trading desk TUI");
+    build_desk_step.dependOn(&desk_exe.step);
+
+    // run-desk: build and run
+    // For release builds, use: zig build run-desk -Doptimize=ReleaseFast
+    const run_desk = b.addRunArtifact(desk_exe);
+    const run_desk_step = b.step("run-desk", "Run the trading desk TUI");
+    run_desk_step.dependOn(&run_desk.step);
+    if (b.args) |args| {
+        run_desk.addArgs(args);
+    }
+
+    // test-desk: run desk tests
+    const desk_tests = b.addTest(.{
+        .name = "desk_test",
+        .root_source_file = b.path("trading/desk/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    desk_tests.root_module.addImport("orderbook", orderbook_mod);
+    desk_tests.root_module.addImport("oms", oms_mod);
+    desk_tests.root_module.addImport("order_types", order_types_mod);
+    desk_tests.root_module.addImport("positions", positions_mod);
+    desk_tests.root_module.addImport("pre_trade", pre_trade_mod);
+    desk_tests.root_module.addImport("memory", memory_mod);
+    desk_tests.root_module.addImport("time", time_mod);
+    desk_tests.root_module.addImport("ring_buffer", ring_buffer_mod);
+    desk_tests.root_module.addImport("thread", thread_mod);
+    desk_tests.root_module.addImport("spot_executor", spot_executor_mod);
+
+    const run_desk_tests = b.addRunArtifact(desk_tests);
+    const test_desk_step = b.step("test-desk", "Run trading desk tests");
+    test_desk_step.dependOn(&run_desk_tests.step);
+    test_step.dependOn(&run_desk_tests.step);
 }
