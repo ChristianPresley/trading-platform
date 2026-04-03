@@ -581,4 +581,91 @@ pub fn build(b: *std.Build) void {
     test_kraken_step.dependOn(&run_kraken_spot_rate_limiter_tests.step);
     test_kraken_step.dependOn(&run_kraken_spot_rest_tests.step);
     test_kraken_step.dependOn(&run_kraken_futures_auth_tests.step);
+
+    // ---- Phase 4: WS clients + Market Data + Order Book ----
+
+    // sdk/domain modules
+    const orderbook_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/domain/orderbook.zig"),
+    });
+    const orderbook_l3_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/domain/orderbook_l3.zig"),
+    });
+    const bar_aggregator_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/domain/bar_aggregator.zig"),
+    });
+    const market_data_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/domain/market_data.zig"),
+    });
+
+    // Kraken spot WS client module
+    const spot_ws_client_mod = b.createModule(.{
+        .root_source_file = b.path("exchanges/kraken/spot/ws_client.zig"),
+    });
+
+    // Kraken futures WS client module
+    const futures_ws_client_mod = b.createModule(.{
+        .root_source_file = b.path("exchanges/kraken/futures/ws_client.zig"),
+    });
+
+    // orderbook tests (L2 + L3)
+    const domain_orderbook_tests = b.addTest(.{
+        .name = "orderbook_test",
+        .root_source_file = b.path("sdk/domain/tests/orderbook_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    domain_orderbook_tests.root_module.addImport("orderbook", orderbook_mod);
+    domain_orderbook_tests.root_module.addImport("orderbook_l3", orderbook_l3_mod);
+
+    // bar_aggregator tests
+    const domain_bar_aggregator_tests = b.addTest(.{
+        .name = "bar_aggregator_test",
+        .root_source_file = b.path("sdk/domain/tests/bar_aggregator_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    domain_bar_aggregator_tests.root_module.addImport("bar_aggregator", bar_aggregator_mod);
+
+    // market_data tests
+    const domain_market_data_tests = b.addTest(.{
+        .name = "market_data_test",
+        .root_source_file = b.path("sdk/domain/tests/market_data_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    domain_market_data_tests.root_module.addImport("market_data", market_data_mod);
+
+    // Kraken spot WS client tests
+    const kraken_spot_ws_tests = b.addTest(.{
+        .name = "kraken_spot_ws_test",
+        .root_source_file = b.path("exchanges/kraken/spot/tests/ws_client_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    kraken_spot_ws_tests.root_module.addImport("spot_ws_client", spot_ws_client_mod);
+
+    // Kraken futures WS client tests
+    const kraken_futures_ws_tests = b.addTest(.{
+        .name = "kraken_futures_ws_test",
+        .root_source_file = b.path("exchanges/kraken/futures/tests/ws_client_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    kraken_futures_ws_tests.root_module.addImport("futures_ws_client", futures_ws_client_mod);
+
+    const run_domain_orderbook_tests = b.addRunArtifact(domain_orderbook_tests);
+    const run_domain_bar_aggregator_tests = b.addRunArtifact(domain_bar_aggregator_tests);
+    const run_domain_market_data_tests = b.addRunArtifact(domain_market_data_tests);
+    const run_kraken_spot_ws_tests = b.addRunArtifact(kraken_spot_ws_tests);
+    const run_kraken_futures_ws_tests = b.addRunArtifact(kraken_futures_ws_tests);
+
+    test_step.dependOn(&run_domain_orderbook_tests.step);
+    test_step.dependOn(&run_domain_bar_aggregator_tests.step);
+    test_step.dependOn(&run_domain_market_data_tests.step);
+    test_step.dependOn(&run_kraken_spot_ws_tests.step);
+    test_step.dependOn(&run_kraken_futures_ws_tests.step);
+
+    test_kraken_step.dependOn(&run_kraken_spot_ws_tests.step);
+    test_kraken_step.dependOn(&run_kraken_futures_ws_tests.step);
 }
