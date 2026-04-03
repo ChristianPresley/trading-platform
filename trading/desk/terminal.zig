@@ -81,14 +81,14 @@ pub const Terminal = struct {
     }
 
     pub fn getSize() !Size {
-        var wsz: posix.winsize = undefined;
+        var wsz: std.os.linux.winsize = undefined;
         const rc = std.os.linux.ioctl(std.io.getStdOut().handle, std.os.linux.T.IOCGWINSZ, @intFromPtr(&wsz));
         if (@as(isize, @bitCast(rc)) < 0) {
             return Size{ .rows = 24, .cols = 80 }; // fallback
         }
         return Size{
-            .rows = if (wsz.row < 10) 10 else wsz.row,
-            .cols = if (wsz.col < 40) 40 else wsz.col,
+            .rows = if (wsz.ws_row < 10) 10 else wsz.ws_row,
+            .cols = if (wsz.ws_col < 40) 40 else wsz.ws_col,
         };
     }
 
