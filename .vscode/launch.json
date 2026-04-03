@@ -1,0 +1,15 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug Desk",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/zig-out/bin/desk",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "Build Desk",
+            "terminal": "integrated"
+        }
+    ]
+}
