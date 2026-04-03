@@ -14,6 +14,7 @@ pub const Action = union(enum) {
     backspace: void,
     quit: void,
     delete_line: void,
+    toggle_positions: void,
 };
 
 const State = enum {
@@ -56,6 +57,10 @@ pub const InputHandler = struct {
                         // 'q' and 'Q' quit unless in text_mode
                         if ((c == 'q' or c == 'Q') and !text_mode) {
                             return Action{ .quit = {} };
+                        }
+                        // 'p' toggles positions overlay unless in text_mode
+                        if (c == 'p' and !text_mode) {
+                            return Action{ .toggle_positions = {} };
                         }
                         return Action{ .char = c };
                     },
