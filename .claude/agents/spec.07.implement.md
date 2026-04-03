@@ -39,7 +39,13 @@ If either is missing, return an error.
 
 2. **Initialize implementation log** at `.claude/specs/{slug}/07-implementation-{NN}.md` with worktree structure and `in-progress` status for all phases.
 
-3. **Spawn worker agents in parallel** for all worktrees in the current batch. Launch all in a single message. For each worktree:
+3. **Copy spec documents into the first worktree** before spawning any workers:
+   ```bash
+   cp -r .claude/specs/{slug}/ {first-worktree-path}/.claude/specs/{slug}/
+   ```
+   This ensures the spec pipeline artifacts (questions, research, design, outline, plan, worktree doc) are committed alongside the implementation. Only do this for the **first worktree in batch 1** — later batches inherit via merge.
+
+4. **Spawn worker agents in parallel** for all worktrees in the current batch. Launch all in a single message. For each worktree:
 
    ```yaml
    subagent_type: "spec.07.worker"
@@ -50,19 +56,22 @@ If either is missing, return an error.
      Branch: {branch-name}
      Assigned phases: {phase numbers and names}
      Plan file: {plan-path}
+     Include spec docs: {true if first worktree in batch 1, false otherwise}
 
      Implement the assigned phases exactly as described in the plan.
      Report back: phases completed, checkpoint results (pass/fail + output), any exceptions.
    ```
 
-4. **Wait for all agents in the current batch.** Update the implementation log sequentially as each completes. For each passing phase, close its GitHub issue (from `meta.md`) with:
+   For the first worktree in batch 1, set `Include spec docs: true`. This tells the worker to commit the spec documents (already copied in step 3) as its first commit before implementing phases.
+
+5. **Wait for all agents in the current batch.** Update the implementation log sequentially as each completes. For each passing phase, close its GitHub issue (from `meta.md`) with:
    ```
    Phase {N} complete — checkpoint passed.
    Command: `{command}`
    Output: {snippet}
    ```
 
-5. **On checkpoint failure — spawn recovery agent (up to 3 attempts):**
+6. **On checkpoint failure — spawn recovery agent (up to 3 attempts):**
 
    For each attempt, spawn the diagnostic agent:
    ```yaml
@@ -93,21 +102,21 @@ If either is missing, return an error.
    - Two simultaneous agent failures → escalate immediately (no parallel recovery)
    - >2 failed phases in same worktree → circuit breaker, stop and escalate
 
-6. **Auto-merge each batch** after all checkpoints pass:
+7. **Auto-merge each batch** after all checkpoints pass:
    ```bash
    git merge {branch} --no-ff -m "feat({slug}): merge batch {N} — {branch}"
    ```
    Merge conflicts → do NOT auto-resolve. List conflicting files, escalate to engineer.
 
-7. **Worktree cleanup** after each merged batch:
+8. **Worktree cleanup** after each merged batch:
    ```bash
    git worktree remove .worktrees/{slug}-{NN}
    ```
    Verify commits are reachable from main first. Never remove with uncommitted/unmerged changes. Do NOT delete feature branches (retained for Phase 8/9).
 
-8. **Spawn next batch** automatically after merge + cleanup. No confirmation needed.
+9. **Spawn next batch** automatically after merge + cleanup. No confirmation needed.
 
-9. **Final update** — update implementation log summary. Check off Phase 7 in tracking issue. Update meta.md.
+10. **Final update** — update implementation log summary. Check off Phase 7 in tracking issue. Update meta.md.
 
 ## Escalation Path
 

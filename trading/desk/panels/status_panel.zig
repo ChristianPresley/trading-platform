@@ -1,26 +1,22 @@
+// Status bar panel renderer.
+
 const std = @import("std");
 const Renderer = @import("../renderer.zig").Renderer;
-const Rect = @import("../layout.zig").Rect;
-const messages = @import("../messages.zig");
-const StatusUpdate = messages.StatusUpdate;
+const layout = @import("../layout.zig");
+const Rect = layout.Rect;
+const msg = @import("../messages.zig");
+const StatusUpdate = msg.StatusUpdate;
 
-pub fn draw(renderer: *Renderer, rect: Rect, status: *const StatusUpdate, instrument_name: []const u8) void {
-    if (rect.w < 20) return;
+pub fn draw(renderer: *Renderer, rect: Rect, status: *const StatusUpdate) void {
+    // No border for status bar — single row
+    const tick_sec = status.tick / 10; // rough seconds (10 ticks/sec)
+    const h = tick_sec / 3600;
+    const m = (tick_sec / 60) % 60;
+    const s = tick_sec % 60;
 
-    // Format time from engine_time_ns
-    const ns = status.engine_time_ns;
-    const secs = ns / 1_000_000_000;
-    const hours = (secs / 3600) % 24;
-    const mins = (secs / 60) % 60;
-    const sec = secs % 60;
-
-    renderer.drawTextFmt(rect.x + 1, rect.y,
-        " {s} | Tick: {d} | {d:0>2}:{d:0>2}:{d:0>2} | Demo Mode | q=quit ",
-        .{
-            instrument_name,
-            status.tick,
-            @as(u64, @intCast(hours)),
-            @as(u64, @intCast(mins)),
-            @as(u64, @intCast(sec)),
-        });
+    renderer.writeFmt("\x1b[{d};{d}HBTC-USD | Tick: {d} | {d:02}:{d:02}:{d:02} | Demo Mode | q=quit", .{
+        rect.y + 1, rect.x + 1,
+        status.tick,
+        h, m, s,
+    });
 }

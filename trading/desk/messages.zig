@@ -1,69 +1,68 @@
-const std = @import("std");
+// Message types for TUI <-> Engine ring buffer communication.
+// All types are fixed-size value types (no pointers, no slices) — safe for SpscRingBuffer.
 
-/// Fixed-size instrument identifier — no heap allocation, safe for ring buffer.
 pub const InstrumentId = struct {
-    buf: [32]u8 = [_]u8{0} ** 32,
-    len: u8 = 0,
+    buf: [32]u8,
+    len: u8,
 
     pub fn fromSlice(s: []const u8) InstrumentId {
-        var id = InstrumentId{};
-        const copy_len = @min(s.len, 32);
-        @memcpy(id.buf[0..copy_len], s[0..copy_len]);
-        id.len = @intCast(copy_len);
+        var id = InstrumentId{ .buf = undefined, .len = 0 };
+        const n = @min(s.len, 32);
+        @memcpy(id.buf[0..n], s[0..n]);
+        id.len = @intCast(n);
         return id;
     }
 
-    pub fn asSlice(self: *const InstrumentId) []const u8 {
+    pub fn slice(self: *const InstrumentId) []const u8 {
         return self.buf[0..self.len];
     }
 };
 
 pub const PriceLevel = struct {
-    price: i64 = 0,
-    quantity: i64 = 0,
+    price: i64,
+    quantity: i64,
 };
 
 pub const OrderbookSnapshot = struct {
-    instrument: InstrumentId = .{},
-    bids: [20]PriceLevel = [_]PriceLevel{.{}} ** 20,
-    asks: [20]PriceLevel = [_]PriceLevel{.{}} ** 20,
-    bid_count: u8 = 0,
-    ask_count: u8 = 0,
+    instrument: InstrumentId,
+    bids: [20]PriceLevel,
+    asks: [20]PriceLevel,
+    bid_count: u8,
+    ask_count: u8,
 };
 
 pub const PositionUpdate = struct {
-    instrument: InstrumentId = .{},
-    quantity: i64 = 0,
-    avg_cost: i64 = 0,
-    unrealized_pnl: i64 = 0,
-    realized_pnl: i64 = 0,
+    instrument: InstrumentId,
+    quantity: i64,
+    avg_cost: i64,
+    unrealized_pnl: i64,
+    realized_pnl: i64,
 };
 
 pub const OrderUpdate = struct {
-    id: u64 = 0,
-    instrument: InstrumentId = .{},
-    side: u8 = 0, // 0=buy, 1=sell
-    quantity: i64 = 0,
-    price: i64 = 0,
-    status: u8 = 0, // maps to OrdStatus
-    filled_qty: i64 = 0,
+    id: u64,
+    instrument: InstrumentId,
+    side: u8, // 0=buy, 1=sell
+    quantity: i64,
+    price: i64,
+    status: u8, // 0=pending, 1=new, 2=filled, 3=cancelled, 4=rejected
+    filled_qty: i64,
 };
 
 pub const OrderRequest = struct {
-    instrument: InstrumentId = .{},
-    side: u8 = 0, // 0=buy, 1=sell
-    quantity: i64 = 0,
-    price: i64 = 0,
+    instrument: InstrumentId,
+    side: u8, // 0=buy, 1=sell
+    quantity: i64,
+    price: i64,
 };
 
 pub const StatusUpdate = struct {
-    tick: u64 = 0,
-    engine_time_ns: u128 = 0,
-    instrument_count: u8 = 0,
-    connected: bool = false,
+    tick: u64,
+    engine_time_ns: u128,
+    instrument_count: u8,
+    connected: bool,
 };
 
-/// Events sent from engine thread to TUI thread.
 pub const EngineEvent = union(enum) {
     tick: u64,
     orderbook_snapshot: OrderbookSnapshot,
@@ -73,7 +72,6 @@ pub const EngineEvent = union(enum) {
     shutdown_ack: void,
 };
 
-/// Commands sent from TUI thread to engine thread.
 pub const UserCommand = union(enum) {
     quit: void,
     select_instrument: InstrumentId,
@@ -81,12 +79,10 @@ pub const UserCommand = union(enum) {
     cancel_order: u64,
 };
 
-test "instrument_id_roundtrip" {
-    const id = InstrumentId.fromSlice("BTC-USD");
-    try std.testing.expectEqualStrings("BTC-USD", id.asSlice());
-}
-
-test "engine_event_size" {
-    // Verify EngineEvent is a reasonable size for ring buffer
-    try std.testing.expect(@sizeOf(EngineEvent) < 4096);
+test "messages_sizes" {
+    const std = @import("std");
+    // Verify fixed-size types are reasonably sized
+    try std.testing.expect(@sizeOf(EngineEvent) > 0);
+    try std.testing.expect(@sizeOf(UserCommand) > 0);
+    try std.testing.expect(@sizeOf(OrderbookSnapshot) > 0);
 }

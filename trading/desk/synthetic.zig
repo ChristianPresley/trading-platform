@@ -1,112 +1,114 @@
+// Synthetic market data feed for Trading Desk TUI demo.
+// Generates random-walk price movements for 2 instruments.
+
 const std = @import("std");
-const orderbook = @import("orderbook");
-const L2Book = orderbook.L2Book;
-const Level = orderbook.Level;
+const L2Book = @import("orderbook").L2Book;
+const Level = @import("orderbook").Level;
+const Side = @import("orderbook").Side;
+
+const DEPTH = 20;
 
 pub const SyntheticFeed = struct {
+    allocator: std.mem.Allocator,
     books: [2]L2Book,
-    base_prices: [2]i64,
     rng: std.Random.DefaultPrng,
     tick_count: u64,
 
-    /// Instrument names (fixed for demo)
-    pub const instruments = [_][]const u8{ "BTC-USD", "ETH-USD" };
+    // Base prices: BTC ~50000.00, ETH ~3000.00
+    // Using 8 decimal places: multiply by 100_000_000
+    // BTC: 50000 * 100_000_000 = 5_000_000_000_000
+    // ETH: 3000 * 100_000_000 = 300_000_000_000
+    base_prices: [2]i64,
 
     pub fn init(allocator: std.mem.Allocator, seed: u64) !SyntheticFeed {
+        var rng = std.Random.DefaultPrng.init(seed);
+        const rand = rng.random();
+
+        const btc_base: i64 = 5_000_000_000_000;
+        const eth_base: i64 = 300_000_000_000;
+        const bases = [2]i64{ btc_base, eth_base };
+
         var books: [2]L2Book = undefined;
-        books[0] = try L2Book.init(allocator, 20);
-        errdefer books[0].deinit();
-        books[1] = try L2Book.init(allocator, 20);
-        errdefer books[1].deinit();
+        for (&books, 0..) |*book, i| {
+            book.* = try L2Book.init(allocator, DEPTH);
+            populateBook(book, bases[i], rand);
+        }
 
-        var feed = SyntheticFeed{
+        return SyntheticFeed{
+            .allocator = allocator,
             .books = books,
-            .base_prices = .{ 5_000_000_000_000, 300_000_000_000 }, // BTC ~50000, ETH ~3000 (8 decimal places)
-            .rng = std.Random.DefaultPrng.init(seed),
+            .rng = rng,
             .tick_count = 0,
+            .base_prices = bases,
         };
-
-        // Initialize with snapshot
-        feed.initSnapshot(0);
-        feed.initSnapshot(1);
-
-        return feed;
     }
 
     pub fn deinit(self: *SyntheticFeed) void {
-        self.books[0].deinit();
-        self.books[1].deinit();
+        for (&self.books) |*book| {
+            book.allocator.free(book.bids_buf);
+            book.allocator.free(book.asks_buf);
+        }
     }
 
-    fn initSnapshot(self: *SyntheticFeed, idx: usize) void {
-        const base = self.base_prices[idx];
-        const tick_size: i64 = if (idx == 0) 100_000_000 else 10_000_000; // BTC: $1, ETH: $0.10
+    /// Populate book with initial levels around base price.
+    fn populateBook(book: *L2Book, base_price: i64, rand: std.Random) void {
+        // Tick size: 1000 (= 0.000010 in 8-decimal)
+        const ts: i64 = 100_000; // tick size ~$0.001 for BTC-scale
 
-        var bids: [20]Level = undefined;
-        var asks: [20]Level = undefined;
+        var bid_levels: [DEPTH]Level = undefined;
+        var ask_levels: [DEPTH]Level = undefined;
 
-        for (0..20) |i| {
+        for (0..DEPTH) |i| {
             const offset: i64 = @intCast(i + 1);
-            bids[i] = Level{
-                .price = base - offset * tick_size,
-                .quantity = @intCast(self.rng.random().intRangeAtMost(i64, 100_000_000, 10_000_000_000)),
-            };
-            asks[i] = Level{
-                .price = base + offset * tick_size,
-                .quantity = @intCast(self.rng.random().intRangeAtMost(i64, 100_000_000, 10_000_000_000)),
-            };
+            const qty: i64 = @intCast(rand.intRangeAtMost(u64, 100_000, 10_000_000));
+            bid_levels[i] = Level{ .price = base_price - offset * ts, .quantity = qty };
+            ask_levels[i] = Level{ .price = base_price + offset * ts, .quantity = qty };
         }
 
-        self.books[idx].applySnapshot(&bids, &asks);
+        book.applySnapshot(&bid_levels, &ask_levels);
     }
 
+    /// Advance one tick: update book prices randomly.
     pub fn tick(self: *SyntheticFeed) void {
         self.tick_count += 1;
+        const rand = self.rng.random();
+        const tick_size: i64 = 100_000;
 
-        for (0..2) |idx| {
-            const tick_size: i64 = if (idx == 0) 100_000_000 else 10_000_000;
-            const random = self.rng.random();
+        for (&self.books, 0..) |*book, i| {
+            // Random walk the base price
+            const delta: i64 = if (rand.boolean()) tick_size else -tick_size;
+            self.base_prices[i] += delta;
+            const base = self.base_prices[i];
 
-            // Update 1-3 random levels per side
-            const num_updates = random.intRangeAtMost(usize, 1, 3);
+            // Occasionally repopulate a few levels
+            const num_updates: usize = rand.intRangeAtMost(usize, 1, 3);
             for (0..num_updates) |_| {
-                // Random bid update
-                const bid_offset: i64 = @intCast(random.intRangeAtMost(usize, 1, 15));
-                const bid_price = self.base_prices[idx] - bid_offset * tick_size;
-                const bid_qty: i64 = @intCast(random.intRangeAtMost(i64, 0, 10_000_000_000));
-                self.books[idx].applyUpdate(.bid, bid_price, bid_qty);
-
-                // Random ask update
-                const ask_offset: i64 = @intCast(random.intRangeAtMost(usize, 1, 15));
-                const ask_price = self.base_prices[idx] + ask_offset * tick_size;
-                const ask_qty: i64 = @intCast(random.intRangeAtMost(i64, 0, 10_000_000_000));
-                self.books[idx].applyUpdate(.ask, ask_price, ask_qty);
+                const level_idx: i64 = @intCast(rand.intRangeAtMost(u64, 1, DEPTH - 1));
+                const qty: i64 = @intCast(rand.intRangeAtMost(u64, 100_000, 10_000_000));
+                const bid_price = base - level_idx * tick_size;
+                const ask_price = base + level_idx * tick_size;
+                book.applyUpdate(.bid, bid_price, qty);
+                book.applyUpdate(.ask, ask_price, qty);
             }
 
-            // Occasionally shift base price (1 in 20 ticks)
-            if (random.intRangeAtMost(u32, 0, 19) == 0) {
-                const shift: i64 = if (random.boolean()) tick_size else -tick_size;
-                self.base_prices[idx] += shift;
+            // Every 20 ticks, repopulate entire book (big move)
+            if (self.tick_count % 20 == 0) {
+                populateBook(book, base, rand);
             }
         }
     }
 
-    pub fn getBook(self: *SyntheticFeed, index: usize) *const L2Book {
+    /// Get const pointer to book at index.
+    pub fn getBook(self: *const SyntheticFeed, index: usize) *const L2Book {
         return &self.books[index];
     }
 };
 
-test "synthetic_feed_init_deinit" {
-    const allocator = std.testing.allocator;
-    var feed = try SyntheticFeed.init(allocator, 42);
+test "synthetic_feed_init" {
+    var feed = try SyntheticFeed.init(std.testing.allocator, 42);
     defer feed.deinit();
-
-    // Should have levels after init
-    const book = feed.getBook(0);
-    try std.testing.expect(book.bids_len > 0);
-    try std.testing.expect(book.asks_len > 0);
-
-    // Tick should not crash
+    try std.testing.expect(feed.books[0].bids_len >= 5);
+    try std.testing.expect(feed.books[0].asks_len >= 5);
     feed.tick();
     try std.testing.expect(feed.tick_count == 1);
 }

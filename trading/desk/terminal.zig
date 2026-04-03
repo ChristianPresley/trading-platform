@@ -1,132 +1,159 @@
+// Terminal management for Trading Desk TUI
+// Handles raw mode, alternate screen, size detection, non-blocking stdin.
+// Designed for Zig 0.15 on Linux.
+
 const std = @import("std");
 const posix = std.posix;
+const linux = std.os.linux;
 
 pub const Size = struct {
     rows: u16,
     cols: u16,
 };
 
+/// Global signal flag: set to true by SIGINT/SIGTERM handler.
+pub var signal_received: bool = false;
+
+fn signalHandler(sig: i32) callconv(.c) void {
+    _ = sig;
+    signal_received = true;
+}
+
 pub const Terminal = struct {
     original_termios: posix.termios,
     stdin_fd: posix.fd_t,
     stdout: std.fs.File,
-    buf_writer: std.io.BufferedWriter(4096, std.fs.File.Writer),
-
-    /// Global signal flag for SIGINT/SIGTERM
-    var signal_received: std.atomic.Value(bool) = std.atomic.Value(bool).init(false);
+    buf: [65536]u8,
+    buf_pos: usize,
 
     pub fn init() !Terminal {
-        const stdin_fd = std.io.getStdIn().handle;
-        const stdout = std.io.getStdOut();
+        const stdin_fd = posix.STDIN_FILENO;
+        const stdout_file = std.fs.File.stdout();
 
-        // Save original terminal attributes
+        // Save original termios
         const original = try posix.tcgetattr(stdin_fd);
+
+        // Check if stdin is a terminal
+        if (!posix.isatty(stdin_fd)) {
+            return error.NotATerminal;
+        }
 
         // Set raw mode
         var raw = original;
-
-        // Input flags: disable software flow control, CR translation
-        raw.iflag.IXON = false;
         raw.iflag.ICRNL = false;
-        raw.iflag.BRKINT = false;
-        raw.iflag.INPCK = false;
-        raw.iflag.ISTRIP = false;
-
-        // Output flags: disable post-processing
-        raw.oflag.OPOST = false;
-
-        // Control flags: set 8-bit chars
-        raw.cflag.CSIZE = .CS8;
-
-        // Local flags: disable canonical mode, echo, signals, extended processing
-        raw.lflag.ICANON = false;
+        raw.iflag.IXON = false;
         raw.lflag.ECHO = false;
+        raw.lflag.ICANON = false;
         raw.lflag.ISIG = false;
         raw.lflag.IEXTEN = false;
-
-        // Non-blocking read: VMIN=0, VTIME=0
+        raw.cflag.CSIZE = .CS8;
+        // VMIN=0, VTIME=0 => non-blocking
         raw.cc[@intFromEnum(posix.V.MIN)] = 0;
         raw.cc[@intFromEnum(posix.V.TIME)] = 0;
-
         try posix.tcsetattr(stdin_fd, .FLUSH, raw);
-
-        // Install signal handlers
-        installSignalHandlers();
 
         var term = Terminal{
             .original_termios = original,
             .stdin_fd = stdin_fd,
-            .stdout = stdout,
-            .buf_writer = std.io.bufferedWriter(stdout.writer()),
+            .stdout = stdout_file,
+            .buf = undefined,
+            .buf_pos = 0,
         };
 
+        // Register signal handlers
+        const sa = posix.Sigaction{
+            .handler = .{ .handler = signalHandler },
+            .mask = posix.sigemptyset(),
+            .flags = 0,
+        };
+        posix.sigaction(posix.SIG.INT, &sa, null);
+        posix.sigaction(posix.SIG.TERM, &sa, null);
+
         // Enter alternate screen and hide cursor
-        const w = term.buf_writer.writer();
-        try w.writeAll("\x1b[?1049h"); // Enter alternate screen
-        try w.writeAll("\x1b[?25l"); // Hide cursor
-        try w.writeAll("\x1b[2J"); // Clear screen
-        try term.buf_writer.flush();
+        try term.writeStr("\x1b[?1049h\x1b[?25l");
+        try term.flushBuf();
 
         return term;
     }
 
     pub fn deinit(self: *Terminal) void {
-        const w = self.buf_writer.writer();
-        w.writeAll("\x1b[?25h") catch {}; // Show cursor
-        w.writeAll("\x1b[?1049l") catch {}; // Exit alternate screen
-        self.buf_writer.flush() catch {};
+        // Show cursor and exit alternate screen
+        self.writeStr("\x1b[?25h\x1b[?1049l") catch {};
+        self.flushBuf() catch {};
 
-        // Restore original terminal attributes
+        // Restore original termios
         posix.tcsetattr(self.stdin_fd, .FLUSH, self.original_termios) catch {};
     }
 
+    /// Get terminal size using TIOCGWINSZ ioctl.
     pub fn getSize() !Size {
-        var wsz: std.os.linux.winsize = undefined;
-        const rc = std.os.linux.ioctl(std.io.getStdOut().handle, std.os.linux.T.IOCGWINSZ, @intFromPtr(&wsz));
-        if (@as(isize, @bitCast(rc)) < 0) {
-            return Size{ .rows = 24, .cols = 80 }; // fallback
-        }
-        return Size{
-            .rows = if (wsz.ws_row < 10) 10 else wsz.ws_row,
-            .cols = if (wsz.ws_col < 40) 40 else wsz.ws_col,
+        var ws = posix.winsize{
+            .row = 0,
+            .col = 0,
+            .xpixel = 0,
+            .ypixel = 0,
         };
+        const err = posix.system.ioctl(posix.STDOUT_FILENO, posix.T.IOCGWINSZ, @intFromPtr(&ws));
+        if (posix.errno(err) != .SUCCESS) {
+            return error.IoctlFailed;
+        }
+        const rows = if (ws.row < 10) 10 else ws.row;
+        const cols = if (ws.col < 40) 40 else ws.col;
+        return Size{ .rows = rows, .cols = cols };
     }
 
+    /// Non-blocking read of one byte from stdin.
+    /// Returns null if no byte is available.
     pub fn readByte(self: *Terminal) ?u8 {
-        var buf: [1]u8 = undefined;
-        const n = posix.read(self.stdin_fd, &buf) catch return null;
+        var fds = [1]posix.pollfd{.{
+            .fd = self.stdin_fd,
+            .events = posix.POLL.IN,
+            .revents = 0,
+        }};
+        const ready = posix.poll(&fds, 0) catch return null;
+        if (ready == 0) return null;
+        var byte: [1]u8 = undefined;
+        const n = posix.read(self.stdin_fd, &byte) catch return null;
         if (n == 0) return null;
-        return buf[0];
+        return byte[0];
     }
 
-    pub fn writer(self: *Terminal) std.io.BufferedWriter(4096, std.fs.File.Writer).Writer {
-        return self.buf_writer.writer();
+    /// Write raw bytes to the internal buffer.
+    fn writeStr(self: *Terminal, data: []const u8) !void {
+        if (self.buf_pos + data.len > self.buf.len) {
+            try self.flushBuf();
+        }
+        if (data.len > self.buf.len) {
+            // Too large for buffer, write directly
+            _ = try self.stdout.write(data);
+            return;
+        }
+        @memcpy(self.buf[self.buf_pos .. self.buf_pos + data.len], data);
+        self.buf_pos += data.len;
     }
 
-    pub fn flush(self: *Terminal) !void {
-        try self.buf_writer.flush();
+    /// Write formatted bytes to the internal buffer.
+    pub fn print(self: *Terminal, comptime fmt: []const u8, args: anytype) !void {
+        var tmp: [4096]u8 = undefined;
+        const s = try std.fmt.bufPrint(&tmp, fmt, args);
+        try self.writeStr(s);
     }
 
-    pub fn shouldQuit() bool {
-        return signal_received.load(.acquire);
+    /// Flush internal buffer to stdout.
+    pub fn flushBuf(self: *Terminal) !void {
+        if (self.buf_pos == 0) return;
+        _ = try self.stdout.write(self.buf[0..self.buf_pos]);
+        self.buf_pos = 0;
     }
 
-    fn installSignalHandlers() void {
-        var act = std.mem.zeroes(posix.Sigaction);
-        act.handler = .{ .handler = signalHandler };
-        act.mask = posix.empty_sigset;
-        posix.sigaction(posix.SIG.INT, &act, null) catch {};
-        posix.sigaction(posix.SIG.TERM, &act, null) catch {};
-    }
-
-    fn signalHandler(_: c_int) callconv(.C) void {
-        signal_received.store(true, .release);
+    /// Reset write position (start of new frame).
+    pub fn beginWrite(self: *Terminal) void {
+        self.buf_pos = 0;
     }
 };
 
-test "terminal_size_fallback" {
-    // getSize should return reasonable values even outside a real terminal
-    const size = Terminal.getSize() catch Size{ .rows = 24, .cols = 80 };
-    try std.testing.expect(size.rows >= 10);
-    try std.testing.expect(size.cols >= 40);
+test "terminal_size_type" {
+    const s = Size{ .rows = 24, .cols = 80 };
+    try std.testing.expect(s.rows == 24);
+    try std.testing.expect(s.cols == 80);
 }

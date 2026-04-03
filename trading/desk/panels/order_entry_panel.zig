@@ -1,239 +1,206 @@
+// Order entry panel: text fields for instrument, side, quantity, price.
+
 const std = @import("std");
 const Renderer = @import("../renderer.zig").Renderer;
-const Rect = @import("../layout.zig").Rect;
-const messages = @import("../messages.zig");
+const layout = @import("../layout.zig");
+const Rect = layout.Rect;
+const msg = @import("../messages.zig");
+const UserCommand = msg.UserCommand;
+const OrderRequest = msg.OrderRequest;
+const InstrumentId = msg.InstrumentId;
 const Action = @import("../input.zig").Action;
 
 pub const TextField = struct {
-    buf: [32]u8 = [_]u8{0} ** 32,
-    len: u8 = 0,
-    cursor: u8 = 0,
+    buf: [32]u8,
+    len: u8,
+    cursor: u8,
 
-    pub fn insertChar(self: *TextField, c: u8) void {
-        if (self.len >= 31) return;
-        // Shift right from cursor
-        var i: u8 = self.len;
-        while (i > self.cursor) : (i -= 1) {
-            self.buf[i] = self.buf[i - 1];
-        }
-        self.buf[self.cursor] = c;
-        self.len += 1;
-        self.cursor += 1;
+    pub fn init(default: []const u8) TextField {
+        var tf = TextField{ .buf = undefined, .len = 0, .cursor = 0 };
+        const n = @min(default.len, 31);
+        @memcpy(tf.buf[0..n], default[0..n]);
+        tf.len = @intCast(n);
+        tf.cursor = tf.len;
+        return tf;
     }
 
-    pub fn deleteBack(self: *TextField) void {
-        if (self.cursor == 0) return;
-        var i: u8 = self.cursor - 1;
-        while (i < self.len - 1) : (i += 1) {
-            self.buf[i] = self.buf[i + 1];
-        }
+    pub fn slice(self: *const TextField) []const u8 {
+        return self.buf[0..self.len];
+    }
+
+    pub fn appendChar(self: *TextField, c: u8) void {
+        if (self.len >= 31) return;
+        self.buf[self.len] = c;
+        self.len += 1;
+        self.cursor = self.len;
+    }
+
+    pub fn backspace(self: *TextField) void {
+        if (self.len == 0) return;
         self.len -= 1;
-        self.cursor -= 1;
+        self.cursor = self.len;
     }
 
     pub fn clear(self: *TextField) void {
         self.len = 0;
         self.cursor = 0;
     }
-
-    pub fn asSlice(self: *const TextField) []const u8 {
-        return self.buf[0..self.len];
-    }
 };
 
 pub const OrderEntryPanel = struct {
-    fields: [3]TextField, // quantity, price, (side is a toggle)
+    fields: [4]TextField,
     active_field: u8,
     side: u8, // 0=buy, 1=sell
-    instrument: messages.InstrumentId,
-    flash_message: [64]u8,
-    flash_len: u8,
-    flash_frames: u8,
 
-    const field_labels = [_][]const u8{ "Qty:", "Price:", "Side:" };
+    const FIELD_LABELS = [_][]const u8{ "Instrument:", "Side:", "Quantity:", "Price:" };
 
     pub fn init(default_instrument: []const u8) OrderEntryPanel {
         return OrderEntryPanel{
-            .fields = .{ .{}, .{}, .{} },
-            .active_field = 0,
+            .fields = .{
+                TextField.init(default_instrument),
+                TextField.init("buy"),
+                TextField.init(""),
+                TextField.init(""),
+            },
+            .active_field = 2, // default focus on quantity
             .side = 0,
-            .instrument = messages.InstrumentId.fromSlice(default_instrument),
-            .flash_message = [_]u8{0} ** 64,
-            .flash_len = 0,
-            .flash_frames = 0,
         };
     }
 
-    /// Handle an action. Returns a UserCommand if the user submitted an order.
-    pub fn handleAction(self: *OrderEntryPanel, action: Action) ?messages.UserCommand {
+    /// Handle an action. Returns a UserCommand if order should be submitted.
+    pub fn handleAction(self: *OrderEntryPanel, action: Action) ?UserCommand {
         switch (action) {
             .arrow_up => {
                 if (self.active_field > 0) self.active_field -= 1;
             },
             .arrow_down => {
-                if (self.active_field < 2) self.active_field += 1;
+                if (self.active_field < 3) self.active_field += 1;
             },
             .char => |c| {
-                if (self.active_field == 2) {
-                    // Side toggle: 'b' for buy, 's' for sell
-                    if (c == 'b' or c == 'B') self.side = 0;
-                    if (c == 's' or c == 'S') self.side = 1;
-                } else {
-                    // Number fields: only accept digits and '.'
-                    if ((c >= '0' and c <= '9') or c == '.') {
-                        self.fields[self.active_field].insertChar(c);
+                if (self.active_field == 1) {
+                    // Side field: toggle with 'b'/'s'
+                    if (c == 'b' or c == 'B') {
+                        self.side = 0;
+                        self.fields[1] = TextField.init("buy");
+                    } else if (c == 's' or c == 'S') {
+                        self.side = 1;
+                        self.fields[1] = TextField.init("sell");
                     }
+                } else {
+                    self.fields[self.active_field].appendChar(c);
                 }
             },
             .backspace => {
-                if (self.active_field < 2) {
-                    self.fields[self.active_field].deleteBack();
+                if (self.active_field != 1) {
+                    self.fields[self.active_field].backspace();
                 }
             },
             .delete_line => {
-                if (self.active_field < 2) {
+                if (self.active_field != 1) {
                     self.fields[self.active_field].clear();
                 }
             },
             .enter => {
-                return self.trySubmit();
+                // Submit order when Enter pressed on price field (field 3)
+                if (self.active_field == 3) {
+                    return self.buildOrder();
+                }
+                // Advance to next field
+                if (self.active_field < 3) self.active_field += 1;
+            },
+            .tab => {
+                if (self.active_field < 3) {
+                    self.active_field += 1;
+                }
+            },
+            .escape => {
+                // Blur order entry — handled by main
             },
             else => {},
         }
         return null;
     }
 
-    fn trySubmit(self: *OrderEntryPanel) ?messages.UserCommand {
+    fn buildOrder(self: *const OrderEntryPanel) ?UserCommand {
         // Parse quantity
-        const qty_str = self.fields[0].asSlice();
-        const price_str = self.fields[1].asSlice();
+        const qty_str = self.fields[2].slice();
+        if (qty_str.len == 0) return null;
+        const qty_int = std.fmt.parseInt(i64, qty_str, 10) catch return null;
+        if (qty_int <= 0) return null;
 
-        if (qty_str.len == 0 or price_str.len == 0) {
-            self.setFlash("Fill qty and price");
-            return null;
-        }
+        // Parse price
+        const price_str = self.fields[3].slice();
+        if (price_str.len == 0) return null;
+        const price_int = std.fmt.parseInt(i64, price_str, 10) catch return null;
+        if (price_int <= 0) return null;
 
-        const qty = parseFixedPoint(qty_str) orelse {
-            self.setFlash("Invalid quantity");
-            return null;
-        };
-        const price = parseFixedPoint(price_str) orelse {
-            self.setFlash("Invalid price");
-            return null;
-        };
-
-        // Clear fields after submit
-        self.fields[0].clear();
-        self.fields[1].clear();
-        self.active_field = 0;
-
-        return .{ .submit_order = .{
-            .instrument = self.instrument,
+        return UserCommand{ .submit_order = OrderRequest{
+            .instrument = InstrumentId.fromSlice(self.fields[0].slice()),
             .side = self.side,
-            .quantity = qty,
-            .price = price,
+            .quantity = qty_int * 100_000_000, // convert to 8 decimal places
+            .price = price_int * 100_000_000,
         } };
     }
 
-    fn setFlash(self: *OrderEntryPanel, msg: []const u8) void {
-        const copy_len = @min(msg.len, 64);
-        @memcpy(self.flash_message[0..copy_len], msg[0..copy_len]);
-        self.flash_len = @intCast(copy_len);
-        self.flash_frames = 30; // ~2 seconds at 15 FPS
-    }
+    pub fn draw(self: *const OrderEntryPanel, renderer: *Renderer, rect: Rect, active: bool) void {
+        const title = if (active) "Order Entry [ACTIVE]" else "Order Entry";
+        renderer.drawBox(rect, title);
 
-    pub fn draw(self: *OrderEntryPanel, renderer: *Renderer, rect: Rect, active: bool) void {
-        if (rect.h < 4 or rect.w < 20) return;
+        if (rect.h < 4 or rect.w < 25) return;
 
-        const inner_x = rect.x + 2;
+        const inner_x = rect.x + 1;
         const inner_y = rect.y + 1;
-        const highlight = if (active) "\x1b[1m" else "";
-        const reset = "\x1b[0m";
-        _ = highlight;
-        _ = reset;
 
-        // Instrument
-        renderer.drawTextFmt(inner_x, inner_y, "Instrument: {s}", .{self.instrument.asSlice()});
+        for (0..4) |i| {
+            const row = inner_y + @as(u16, @intCast(i));
+            if (row >= rect.y + rect.h - 1) break;
 
-        // Fields
-        for (0..3) |fi| {
-            const row = inner_y + 1 + @as(u16, @intCast(fi));
-            const is_active = active and (self.active_field == @as(u8, @intCast(fi)));
-            const prefix: []const u8 = if (is_active) "\x1b[7m" else "";
-            const suffix: []const u8 = if (is_active) "\x1b[0m" else "";
+            const label = FIELD_LABELS[i];
+            const value = self.fields[i].slice();
 
-            if (fi == 2) {
-                // Side toggle
-                const side_str: []const u8 = if (self.side == 0) "BUY (b/s to toggle)" else "SELL (b/s to toggle)";
-                renderer.drawTextFmt(inner_x, row, "{s}{s} {s}{s}", .{ prefix, field_labels[fi], side_str, suffix });
+            if (active and self.active_field == i) {
+                // Highlight active field with inverse video
+                renderer.writeFmt("\x1b[{d};{d}H\x1b[7m{s:<12}\x1b[0m {s}", .{
+                    row + 1, inner_x + 1, label, value,
+                });
             } else {
-                renderer.drawTextFmt(inner_x, row, "{s}{s} {s}{s}", .{ prefix, field_labels[fi], self.fields[fi].asSlice(), suffix });
+                renderer.writeFmt("\x1b[{d};{d}H{s:<12} {s}", .{
+                    row + 1, inner_x + 1, label, value,
+                });
             }
         }
 
-        // Flash message
-        if (self.flash_frames > 0) {
-            self.flash_frames -= 1;
-            renderer.drawTextFmt(inner_x, inner_y + 5, "\x1b[33m{s}\x1b[0m", .{self.flash_message[0..self.flash_len]});
-        }
-
-        // Submit hint
-        if (active) {
-            renderer.drawText(inner_x, inner_y + 6, "Enter=submit  Esc=back");
+        // Help text
+        const help_row = inner_y + 4;
+        if (help_row < rect.y + rect.h - 1) {
+            renderer.writeFmt("\x1b[{d};{d}HEnter=submit b/s=side Esc=exit", .{
+                help_row + 1, inner_x + 1,
+            });
         }
     }
 };
 
-/// Parse a decimal string like "50000.50" into fixed-point i64 with 8 decimal places.
-fn parseFixedPoint(s: []const u8) ?i64 {
-    if (s.len == 0) return null;
-    var whole: i64 = 0;
-    var frac: i64 = 0;
-    var frac_digits: u8 = 0;
-    var in_frac = false;
-
-    for (s) |c| {
-        if (c == '.') {
-            if (in_frac) return null; // double dot
-            in_frac = true;
-            continue;
-        }
-        if (c < '0' or c > '9') return null;
-        if (in_frac) {
-            if (frac_digits < 8) {
-                frac = frac * 10 + @as(i64, c - '0');
-                frac_digits += 1;
-            }
-        } else {
-            whole = whole * 10 + @as(i64, c - '0');
-        }
-    }
-
-    // Scale frac to 8 decimal places
-    var i: u8 = frac_digits;
-    while (i < 8) : (i += 1) {
-        frac *= 10;
-    }
-
-    return whole * 100_000_000 + frac;
+test "order_entry_init" {
+    var panel = OrderEntryPanel.init("BTC-USD");
+    try @import("std").testing.expectEqualStrings("BTC-USD", panel.fields[0].slice());
 }
 
-test "parse_fixed_point" {
-    try std.testing.expectEqual(@as(?i64, 5_000_050_000_000), parseFixedPoint("50000.50"));
-    try std.testing.expectEqual(@as(?i64, 100_000_000), parseFixedPoint("1"));
-    try std.testing.expectEqual(@as(?i64, 50_000_000), parseFixedPoint("0.5"));
-    try std.testing.expectEqual(@as(?i64, null), parseFixedPoint(""));
-    try std.testing.expectEqual(@as(?i64, null), parseFixedPoint("abc"));
-}
-
-test "text_field_operations" {
-    var field = TextField{};
-    field.insertChar('1');
-    field.insertChar('2');
-    field.insertChar('3');
-    try std.testing.expectEqualStrings("123", field.asSlice());
-    field.deleteBack();
-    try std.testing.expectEqualStrings("12", field.asSlice());
-    field.clear();
-    try std.testing.expectEqualStrings("", field.asSlice());
+test "order_entry_submit" {
+    const std_ = @import("std");
+    var panel = OrderEntryPanel.init("BTC-USD");
+    panel.active_field = 2;
+    // Type quantity
+    _ = panel.handleAction(Action{ .char = '1' });
+    _ = panel.handleAction(Action{ .char = '0' });
+    panel.active_field = 3;
+    // Type price
+    _ = panel.handleAction(Action{ .char = '5' });
+    _ = panel.handleAction(Action{ .char = '0' });
+    _ = panel.handleAction(Action{ .char = '0' });
+    _ = panel.handleAction(Action{ .char = '0' });
+    _ = panel.handleAction(Action{ .char = '0' });
+    // Submit
+    const cmd = panel.handleAction(Action{ .enter = {} });
+    try std_.testing.expect(cmd != null);
+    try std_.testing.expect(cmd.? == .submit_order);
 }

@@ -18,11 +18,14 @@ pub fn build(b: *std.Build) void {
             name: []const u8,
             root: []const u8,
         ) *std.Build.Step.Compile {
-            const test_exe = bb.addTest(.{
-                .name = name,
+            const test_mod = bb.createModule(.{
                 .root_source_file = bb.path(root),
                 .target = t,
                 .optimize = opt,
+            });
+            const test_exe = bb.addTest(.{
+                .name = name,
+                .root_module = test_mod,
             });
             // Make sdk/core available as a module search path
             // In Zig 0.13, addAnonymousModule or addPath is the mechanism.
@@ -36,32 +39,41 @@ pub fn build(b: *std.Build) void {
     // Solution: use a wrapper root file that lives in sdk/core/
     // and imports the implementation files using relative paths within the module.
 
-    const core_memory_tests = b.addTest(.{
-        .name = "memory_test",
+    const core_memory_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/core/tests/memory_test.zig"),
         .target = target,
         .optimize = optimize,
+    });
+    const core_memory_tests = b.addTest(.{
+        .name = "memory_test",
+        .root_module = core_memory_tests_mod,
     });
     // Allow importing parent directory files by setting root to sdk/core
     core_memory_tests.root_module.addAnonymousImport("memory", .{
         .root_source_file = b.path("sdk/core/memory.zig"),
     });
 
-    const core_time_tests = b.addTest(.{
-        .name = "time_test",
+    const core_time_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/core/tests/time_test.zig"),
         .target = target,
         .optimize = optimize,
+    });
+    const core_time_tests = b.addTest(.{
+        .name = "time_test",
+        .root_module = core_time_tests_mod,
     });
     core_time_tests.root_module.addAnonymousImport("time", .{
         .root_source_file = b.path("sdk/core/time.zig"),
     });
 
-    const core_containers_tests = b.addTest(.{
-        .name = "containers_test",
+    const core_containers_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/core/tests/containers_test.zig"),
         .target = target,
         .optimize = optimize,
+    });
+    const core_containers_tests = b.addTest(.{
+        .name = "containers_test",
+        .root_module = core_containers_tests_mod,
     });
     core_containers_tests.root_module.addAnonymousImport("ring_buffer", .{
         .root_source_file = b.path("sdk/core/containers/ring_buffer.zig"),
@@ -99,11 +111,14 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("sdk/core/crypto/ecdsa.zig"),
     });
 
-    const core_crypto_tests = b.addTest(.{
-        .name = "crypto_test",
+    const core_crypto_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/core/tests/crypto_test.zig"),
         .target = target,
         .optimize = optimize,
+    });
+    const core_crypto_tests = b.addTest(.{
+        .name = "crypto_test",
+        .root_module = core_crypto_tests_mod,
     });
     core_crypto_tests.root_module.addImport("hmac", hmac_mod);
     core_crypto_tests.root_module.addImport("base64", base64_mod);
@@ -116,11 +131,14 @@ pub fn build(b: *std.Build) void {
     _ = addCoreTest;
 
     // Event store tests (sdk/core)
-    const core_event_store_tests = b.addTest(.{
-        .name = "event_store_test",
+    const core_event_store_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/core/tests/event_store_test.zig"),
         .target = target,
         .optimize = optimize,
+    });
+    const core_event_store_tests = b.addTest(.{
+        .name = "event_store_test",
+        .root_module = core_event_store_tests_mod,
     });
     core_event_store_tests.root_module.addAnonymousImport("event_store", .{
         .root_source_file = b.path("sdk/core/event_store.zig"),
@@ -160,57 +178,75 @@ pub fn build(b: *std.Build) void {
     _ = risk_stress_mod;
 
     // Domain tests: OMS
-    const domain_oms_tests = b.addTest(.{
-        .name = "oms_test",
+    const domain_oms_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/domain/tests/oms_test.zig"),
         .target = target,
         .optimize = optimize,
     });
+    const domain_oms_tests = b.addTest(.{
+        .name = "oms_test",
+        .root_module = domain_oms_tests_mod,
+    });
     domain_oms_tests.root_module.addImport("oms", oms_mod);
 
     // Domain tests: order_types
-    const domain_order_types_tests = b.addTest(.{
-        .name = "order_types_test",
+    const domain_order_types_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/domain/tests/order_types_test.zig"),
         .target = target,
         .optimize = optimize,
     });
+    const domain_order_types_tests = b.addTest(.{
+        .name = "order_types_test",
+        .root_module = domain_order_types_tests_mod,
+    });
     domain_order_types_tests.root_module.addImport("order_types", order_types_mod);
 
     // Domain tests: risk/pre_trade
-    const domain_risk_tests = b.addTest(.{
-        .name = "risk_test",
+    const domain_risk_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/domain/tests/risk_test.zig"),
         .target = target,
         .optimize = optimize,
+    });
+    const domain_risk_tests = b.addTest(.{
+        .name = "risk_test",
+        .root_module = domain_risk_tests_mod,
     });
     domain_risk_tests.root_module.addImport("pre_trade", pre_trade_mod);
     domain_risk_tests.root_module.addImport("oms", oms_mod);
 
     // Phase 8: positions tests
-    const domain_positions_tests = b.addTest(.{
-        .name = "positions_test",
+    const domain_positions_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/domain/tests/positions_test.zig"),
         .target = target,
         .optimize = optimize,
     });
+    const domain_positions_tests = b.addTest(.{
+        .name = "positions_test",
+        .root_module = domain_positions_tests_mod,
+    });
     domain_positions_tests.root_module.addImport("positions", positions_mod);
 
     // Phase 8: VaR tests
-    const domain_var_tests = b.addTest(.{
-        .name = "var_test",
+    const domain_var_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/domain/tests/var_test.zig"),
         .target = target,
         .optimize = optimize,
     });
+    const domain_var_tests = b.addTest(.{
+        .name = "var_test",
+        .root_module = domain_var_tests_mod,
+    });
     domain_var_tests.root_module.addImport("var", risk_var_mod);
 
     // Phase 8: greeks tests
-    const domain_greeks_tests = b.addTest(.{
-        .name = "greeks_test",
+    const domain_greeks_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/domain/tests/greeks_test.zig"),
         .target = target,
         .optimize = optimize,
+    });
+    const domain_greeks_tests = b.addTest(.{
+        .name = "greeks_test",
+        .root_module = domain_greeks_tests_mod,
     });
     domain_greeks_tests.root_module.addImport("greeks", risk_greeks_mod);
 
@@ -236,48 +272,63 @@ pub fn build(b: *std.Build) void {
     });
 
     // Phase 11: reconciliation tests
-    const domain_reconciliation_tests = b.addTest(.{
-        .name = "reconciliation_test",
+    const domain_reconciliation_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/domain/post_trade/tests/reconciliation_test.zig"),
         .target = target,
         .optimize = optimize,
     });
+    const domain_reconciliation_tests = b.addTest(.{
+        .name = "reconciliation_test",
+        .root_module = domain_reconciliation_tests_mod,
+    });
     domain_reconciliation_tests.root_module.addImport("reconciliation", reconciliation_mod);
 
     // Phase 11: EOD tests
-    const domain_eod_tests = b.addTest(.{
-        .name = "eod_test",
+    const domain_eod_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/domain/post_trade/tests/eod_test.zig"),
         .target = target,
         .optimize = optimize,
+    });
+    const domain_eod_tests = b.addTest(.{
+        .name = "eod_test",
+        .root_module = domain_eod_tests_mod,
     });
     domain_eod_tests.root_module.addImport("eod", eod_mod);
     domain_eod_tests.root_module.addImport("reconciliation", reconciliation_mod);
 
     // Phase 11: allocation tests
-    const domain_allocation_tests = b.addTest(.{
-        .name = "allocation_test",
+    const domain_allocation_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/domain/post_trade/tests/allocation_test.zig"),
         .target = target,
         .optimize = optimize,
     });
+    const domain_allocation_tests = b.addTest(.{
+        .name = "allocation_test",
+        .root_module = domain_allocation_tests_mod,
+    });
     domain_allocation_tests.root_module.addImport("allocation", allocation_mod);
 
     // Phase 11: tick store tests
-    const domain_tick_store_tests = b.addTest(.{
-        .name = "tick_store_test",
+    const domain_tick_store_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/domain/tests/tick_store_test.zig"),
         .target = target,
         .optimize = optimize,
     });
+    const domain_tick_store_tests = b.addTest(.{
+        .name = "tick_store_test",
+        .root_module = domain_tick_store_tests_mod,
+    });
     domain_tick_store_tests.root_module.addImport("tick_store", tick_store_mod);
 
     // Phase 11: parquet tests
-    const domain_parquet_tests = b.addTest(.{
-        .name = "parquet_test",
+    const domain_parquet_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/domain/tests/parquet_test.zig"),
         .target = target,
         .optimize = optimize,
+    });
+    const domain_parquet_tests = b.addTest(.{
+        .name = "parquet_test",
+        .root_module = domain_parquet_tests_mod,
     });
     domain_parquet_tests.root_module.addImport("parquet_writer", parquet_writer_mod);
 
@@ -299,47 +350,62 @@ pub fn build(b: *std.Build) void {
     });
 
     // Phase 10: TWAP tests
-    const domain_twap_tests = b.addTest(.{
-        .name = "twap_test",
+    const domain_twap_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/domain/algos/tests/twap_test.zig"),
         .target = target,
         .optimize = optimize,
     });
+    const domain_twap_tests = b.addTest(.{
+        .name = "twap_test",
+        .root_module = domain_twap_tests_mod,
+    });
     domain_twap_tests.root_module.addImport("twap", twap_mod);
 
     // Phase 10: VWAP tests
-    const domain_vwap_tests = b.addTest(.{
-        .name = "vwap_test",
+    const domain_vwap_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/domain/algos/tests/vwap_test.zig"),
         .target = target,
         .optimize = optimize,
     });
+    const domain_vwap_tests = b.addTest(.{
+        .name = "vwap_test",
+        .root_module = domain_vwap_tests_mod,
+    });
     domain_vwap_tests.root_module.addImport("vwap", vwap_mod);
 
     // Phase 10: POV tests
-    const domain_pov_tests = b.addTest(.{
-        .name = "pov_test",
+    const domain_pov_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/domain/algos/tests/pov_test.zig"),
         .target = target,
         .optimize = optimize,
     });
+    const domain_pov_tests = b.addTest(.{
+        .name = "pov_test",
+        .root_module = domain_pov_tests_mod,
+    });
     domain_pov_tests.root_module.addImport("pov", pov_mod);
 
     // Phase 10: Iceberg tests
-    const domain_iceberg_tests = b.addTest(.{
-        .name = "iceberg_test",
+    const domain_iceberg_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/domain/algos/tests/iceberg_test.zig"),
         .target = target,
         .optimize = optimize,
     });
+    const domain_iceberg_tests = b.addTest(.{
+        .name = "iceberg_test",
+        .root_module = domain_iceberg_tests_mod,
+    });
     domain_iceberg_tests.root_module.addImport("iceberg", iceberg_mod);
 
     // Phase 10: SOR tests
-    const domain_sor_tests = b.addTest(.{
-        .name = "sor_test",
+    const domain_sor_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/domain/tests/sor_test.zig"),
         .target = target,
         .optimize = optimize,
+    });
+    const domain_sor_tests = b.addTest(.{
+        .name = "sor_test",
+        .root_module = domain_sor_tests_mod,
     });
     domain_sor_tests.root_module.addImport("sor", sor_mod);
 
@@ -432,86 +498,110 @@ pub fn build(b: *std.Build) void {
     http_client_mod.addImport("chunked", http_chunked_mod);
 
     // JSON tests
-    const proto_json_tests = b.addTest(.{
-        .name = "json_test",
+    const proto_json_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/protocol/tests/json_test.zig"),
         .target = target,
         .optimize = optimize,
     });
+    const proto_json_tests = b.addTest(.{
+        .name = "json_test",
+        .root_module = proto_json_tests_mod,
+    });
     proto_json_tests.root_module.addImport("json", json_mod);
 
     // TLS tests
-    const proto_tls_tests = b.addTest(.{
-        .name = "tls_test",
+    const proto_tls_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/protocol/tests/tls_test.zig"),
         .target = target,
         .optimize = optimize,
+    });
+    const proto_tls_tests = b.addTest(.{
+        .name = "tls_test",
+        .root_module = proto_tls_tests_mod,
     });
     proto_tls_tests.root_module.addImport("record", tls_record_mod);
     proto_tls_tests.root_module.addImport("x509", x509_mod);
     proto_tls_tests.root_module.addImport("tls_client", tls_client_mod);
 
     // HTTP tests
-    const proto_http_tests = b.addTest(.{
-        .name = "http_test",
+    const proto_http_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/protocol/tests/http_test.zig"),
         .target = target,
         .optimize = optimize,
+    });
+    const proto_http_tests = b.addTest(.{
+        .name = "http_test",
+        .root_module = proto_http_tests_mod,
     });
     proto_http_tests.root_module.addImport("url", http_url_mod);
     proto_http_tests.root_module.addImport("chunked", http_chunked_mod);
     proto_http_tests.root_module.addImport("http_client", http_client_mod);
 
     // ITCH tests
-    const proto_itch_tests = b.addTest(.{
-        .name = "itch_test",
+    const proto_itch_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/protocol/tests/itch_test.zig"),
         .target = target,
         .optimize = optimize,
+    });
+    const proto_itch_tests = b.addTest(.{
+        .name = "itch_test",
+        .root_module = proto_itch_tests_mod,
     });
     proto_itch_tests.root_module.addAnonymousImport("itch", .{
         .root_source_file = b.path("sdk/protocol/itch.zig"),
     });
 
     // SBE tests
-    const proto_sbe_tests = b.addTest(.{
-        .name = "sbe_test",
+    const proto_sbe_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/protocol/tests/sbe_test.zig"),
         .target = target,
         .optimize = optimize,
+    });
+    const proto_sbe_tests = b.addTest(.{
+        .name = "sbe_test",
+        .root_module = proto_sbe_tests_mod,
     });
     proto_sbe_tests.root_module.addAnonymousImport("sbe", .{
         .root_source_file = b.path("sdk/protocol/sbe.zig"),
     });
 
     // FAST tests
-    const proto_fast_tests = b.addTest(.{
-        .name = "fast_test",
+    const proto_fast_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/protocol/tests/fast_test.zig"),
         .target = target,
         .optimize = optimize,
+    });
+    const proto_fast_tests = b.addTest(.{
+        .name = "fast_test",
+        .root_module = proto_fast_tests_mod,
     });
     proto_fast_tests.root_module.addAnonymousImport("fast", .{
         .root_source_file = b.path("sdk/protocol/fast.zig"),
     });
 
     // OUCH tests
-    const proto_ouch_tests = b.addTest(.{
-        .name = "ouch_test",
+    const proto_ouch_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/protocol/tests/ouch_test.zig"),
         .target = target,
         .optimize = optimize,
+    });
+    const proto_ouch_tests = b.addTest(.{
+        .name = "ouch_test",
+        .root_module = proto_ouch_tests_mod,
     });
     proto_ouch_tests.root_module.addAnonymousImport("ouch", .{
         .root_source_file = b.path("sdk/protocol/ouch.zig"),
     });
 
     // PITCH tests
-    const proto_pitch_tests = b.addTest(.{
-        .name = "pitch_test",
+    const proto_pitch_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/protocol/tests/pitch_test.zig"),
         .target = target,
         .optimize = optimize,
+    });
+    const proto_pitch_tests = b.addTest(.{
+        .name = "pitch_test",
+        .root_module = proto_pitch_tests_mod,
     });
     proto_pitch_tests.root_module.addAnonymousImport("pitch", .{
         .root_source_file = b.path("sdk/protocol/pitch.zig"),
@@ -531,20 +621,26 @@ pub fn build(b: *std.Build) void {
     fix_session_mod.addImport("seq_store", fix_seq_store_mod);
 
     // FIX codec tests
-    const fix_codec_tests = b.addTest(.{
-        .name = "fix_codec_test",
+    const fix_codec_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/protocol/fix/tests/codec_test.zig"),
         .target = target,
         .optimize = optimize,
     });
+    const fix_codec_tests = b.addTest(.{
+        .name = "fix_codec_test",
+        .root_module = fix_codec_tests_mod,
+    });
     fix_codec_tests.root_module.addImport("fix_codec", fix_codec_mod);
 
     // FIX session tests
-    const fix_session_tests = b.addTest(.{
-        .name = "fix_session_test",
+    const fix_session_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/protocol/fix/tests/session_test.zig"),
         .target = target,
         .optimize = optimize,
+    });
+    const fix_session_tests = b.addTest(.{
+        .name = "fix_session_test",
+        .root_module = fix_session_tests_mod,
     });
     fix_session_tests.root_module.addImport("fix_codec", fix_codec_mod);
     fix_session_tests.root_module.addImport("fix_session", fix_session_mod);
@@ -560,11 +656,14 @@ pub fn build(b: *std.Build) void {
     kraken_fix_client_mod.addImport("base64", base64_mod);
 
     // Kraken FIX client tests
-    const kraken_fix_client_tests = b.addTest(.{
-        .name = "kraken_fix_client_test",
+    const kraken_fix_client_tests_mod = b.createModule(.{
         .root_source_file = b.path("exchanges/kraken/spot/tests/fix_client_test.zig"),
         .target = target,
         .optimize = optimize,
+    });
+    const kraken_fix_client_tests = b.addTest(.{
+        .name = "kraken_fix_client_test",
+        .root_module = kraken_fix_client_tests_mod,
     });
     kraken_fix_client_tests.root_module.addImport("fix_client", kraken_fix_client_mod);
     kraken_fix_client_tests.root_module.addImport("fix_codec", fix_codec_mod);
@@ -615,11 +714,14 @@ pub fn build(b: *std.Build) void {
     });
 
     // WebSocket frame tests
-    const ws_frame_tests = b.addTest(.{
-        .name = "frame_test",
+    const ws_frame_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/protocol/websocket/tests/frame_test.zig"),
         .target = target,
         .optimize = optimize,
+    });
+    const ws_frame_tests = b.addTest(.{
+        .name = "frame_test",
+        .root_module = ws_frame_tests_mod,
     });
     ws_frame_tests.root_module.addImport("frame", ws_frame_mod);
 
@@ -677,40 +779,52 @@ pub fn build(b: *std.Build) void {
     futures_rest_client_mod.addImport("futures_types", futures_types_mod);
 
     // Kraken spot auth tests
-    const kraken_spot_auth_tests = b.addTest(.{
-        .name = "kraken_spot_auth_test",
+    const kraken_spot_auth_tests_mod = b.createModule(.{
         .root_source_file = b.path("exchanges/kraken/spot/tests/auth_test.zig"),
         .target = target,
         .optimize = optimize,
+    });
+    const kraken_spot_auth_tests = b.addTest(.{
+        .name = "kraken_spot_auth_test",
+        .root_module = kraken_spot_auth_tests_mod,
     });
     kraken_spot_auth_tests.root_module.addImport("spot_auth", spot_auth_mod);
     kraken_spot_auth_tests.root_module.addImport("base64", base64_mod);
     kraken_spot_auth_tests.root_module.addImport("hmac", hmac_mod);
 
     // Kraken spot rate limiter tests
-    const kraken_spot_rate_limiter_tests = b.addTest(.{
-        .name = "kraken_spot_rate_limiter_test",
+    const kraken_spot_rate_limiter_tests_mod = b.createModule(.{
         .root_source_file = b.path("exchanges/kraken/spot/tests/rate_limiter_test.zig"),
         .target = target,
         .optimize = optimize,
     });
+    const kraken_spot_rate_limiter_tests = b.addTest(.{
+        .name = "kraken_spot_rate_limiter_test",
+        .root_module = kraken_spot_rate_limiter_tests_mod,
+    });
     kraken_spot_rate_limiter_tests.root_module.addImport("spot_rate_limiter", spot_rate_limiter_mod);
 
     // Kraken spot rest_client tests
-    const kraken_spot_rest_tests = b.addTest(.{
-        .name = "kraken_spot_rest_test",
+    const kraken_spot_rest_tests_mod = b.createModule(.{
         .root_source_file = b.path("exchanges/kraken/spot/tests/rest_client_test.zig"),
         .target = target,
         .optimize = optimize,
     });
+    const kraken_spot_rest_tests = b.addTest(.{
+        .name = "kraken_spot_rest_test",
+        .root_module = kraken_spot_rest_tests_mod,
+    });
     kraken_spot_rest_tests.root_module.addImport("json", json_mod);
 
     // Kraken futures auth tests
-    const kraken_futures_auth_tests = b.addTest(.{
-        .name = "kraken_futures_auth_test",
+    const kraken_futures_auth_tests_mod = b.createModule(.{
         .root_source_file = b.path("exchanges/kraken/futures/tests/auth_test.zig"),
         .target = target,
         .optimize = optimize,
+    });
+    const kraken_futures_auth_tests = b.addTest(.{
+        .name = "kraken_futures_auth_test",
+        .root_module = kraken_futures_auth_tests_mod,
     });
     kraken_futures_auth_tests.root_module.addImport("futures_auth", futures_auth_mod);
     kraken_futures_auth_tests.root_module.addImport("base64", base64_mod);
@@ -763,48 +877,63 @@ pub fn build(b: *std.Build) void {
     funding_arb_mod.addImport("orderbook", orderbook_mod_p12);
 
     // TCA tests
-    const tca_tests = b.addTest(.{
-        .name = "tca_test",
+    const tca_tests_mod = b.createModule(.{
         .root_source_file = b.path("trading/analytics/tests/tca_test.zig"),
         .target = target,
         .optimize = optimize,
     });
+    const tca_tests = b.addTest(.{
+        .name = "tca_test",
+        .root_module = tca_tests_mod,
+    });
     tca_tests.root_module.addImport("tca", tca_mod);
 
     // Attribution tests
-    const attribution_tests = b.addTest(.{
-        .name = "attribution_test",
+    const attribution_tests_mod = b.createModule(.{
         .root_source_file = b.path("trading/analytics/tests/attribution_test.zig"),
         .target = target,
         .optimize = optimize,
     });
+    const attribution_tests = b.addTest(.{
+        .name = "attribution_test",
+        .root_module = attribution_tests_mod,
+    });
     attribution_tests.root_module.addImport("attribution", attribution_mod);
 
     // VPIN tests
-    const vpin_tests = b.addTest(.{
-        .name = "vpin_test",
+    const vpin_tests_mod = b.createModule(.{
         .root_source_file = b.path("trading/analytics/tests/vpin_test.zig"),
         .target = target,
         .optimize = optimize,
     });
+    const vpin_tests = b.addTest(.{
+        .name = "vpin_test",
+        .root_module = vpin_tests_mod,
+    });
     vpin_tests.root_module.addImport("vpin", vpin_mod);
 
     // Basis strategy tests
-    const basis_tests = b.addTest(.{
-        .name = "basis_test",
+    const basis_tests_mod = b.createModule(.{
         .root_source_file = b.path("trading/strategies/tests/basis_test.zig"),
         .target = target,
         .optimize = optimize,
+    });
+    const basis_tests = b.addTest(.{
+        .name = "basis_test",
+        .root_module = basis_tests_mod,
     });
     basis_tests.root_module.addImport("basis", basis_mod);
     basis_tests.root_module.addImport("orderbook", orderbook_mod_p12);
 
     // Funding arb tests
-    const funding_arb_tests = b.addTest(.{
-        .name = "funding_arb_test",
+    const funding_arb_tests_mod = b.createModule(.{
         .root_source_file = b.path("trading/strategies/tests/funding_arb_test.zig"),
         .target = target,
         .optimize = optimize,
+    });
+    const funding_arb_tests = b.addTest(.{
+        .name = "funding_arb_test",
+        .root_module = funding_arb_tests_mod,
     });
     funding_arb_tests.root_module.addImport("funding_arb", funding_arb_mod);
     funding_arb_tests.root_module.addImport("orderbook", orderbook_mod_p12);
@@ -848,48 +977,63 @@ pub fn build(b: *std.Build) void {
     });
 
     // orderbook tests (L2 + L3)
-    const domain_orderbook_tests = b.addTest(.{
-        .name = "orderbook_test",
+    const domain_orderbook_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/domain/tests/orderbook_test.zig"),
         .target = target,
         .optimize = optimize,
+    });
+    const domain_orderbook_tests = b.addTest(.{
+        .name = "orderbook_test",
+        .root_module = domain_orderbook_tests_mod,
     });
     domain_orderbook_tests.root_module.addImport("orderbook", orderbook_mod);
     domain_orderbook_tests.root_module.addImport("orderbook_l3", orderbook_l3_mod);
 
     // bar_aggregator tests
-    const domain_bar_aggregator_tests = b.addTest(.{
-        .name = "bar_aggregator_test",
+    const domain_bar_aggregator_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/domain/tests/bar_aggregator_test.zig"),
         .target = target,
         .optimize = optimize,
     });
+    const domain_bar_aggregator_tests = b.addTest(.{
+        .name = "bar_aggregator_test",
+        .root_module = domain_bar_aggregator_tests_mod,
+    });
     domain_bar_aggregator_tests.root_module.addImport("bar_aggregator", bar_aggregator_mod);
 
     // market_data tests
-    const domain_market_data_tests = b.addTest(.{
-        .name = "market_data_test",
+    const domain_market_data_tests_mod = b.createModule(.{
         .root_source_file = b.path("sdk/domain/tests/market_data_test.zig"),
         .target = target,
         .optimize = optimize,
     });
+    const domain_market_data_tests = b.addTest(.{
+        .name = "market_data_test",
+        .root_module = domain_market_data_tests_mod,
+    });
     domain_market_data_tests.root_module.addImport("market_data", market_data_mod);
 
     // Kraken spot WS client tests
-    const kraken_spot_ws_tests = b.addTest(.{
-        .name = "kraken_spot_ws_test",
+    const kraken_spot_ws_tests_mod = b.createModule(.{
         .root_source_file = b.path("exchanges/kraken/spot/tests/ws_client_test.zig"),
         .target = target,
         .optimize = optimize,
     });
+    const kraken_spot_ws_tests = b.addTest(.{
+        .name = "kraken_spot_ws_test",
+        .root_module = kraken_spot_ws_tests_mod,
+    });
     kraken_spot_ws_tests.root_module.addImport("spot_ws_client", spot_ws_client_mod);
 
     // Kraken futures WS client tests
-    const kraken_futures_ws_tests = b.addTest(.{
-        .name = "kraken_futures_ws_test",
+    const kraken_futures_ws_tests_mod = b.createModule(.{
         .root_source_file = b.path("exchanges/kraken/futures/tests/ws_client_test.zig"),
         .target = target,
         .optimize = optimize,
+    });
+    const kraken_futures_ws_tests = b.addTest(.{
+        .name = "kraken_futures_ws_test",
+        .root_module = kraken_futures_ws_tests_mod,
     });
     kraken_futures_ws_tests.root_module.addImport("futures_ws_client", futures_ws_client_mod);
 
@@ -928,20 +1072,26 @@ pub fn build(b: *std.Build) void {
     futures_executor_mod.addImport("oms", oms_mod);
 
     // Symbol translator tests
-    const kraken_symbol_translator_tests = b.addTest(.{
-        .name = "kraken_symbol_translator_test",
+    const kraken_symbol_translator_tests_mod = b.createModule(.{
         .root_source_file = b.path("exchanges/kraken/common/tests/symbol_translator_test.zig"),
         .target = target,
         .optimize = optimize,
     });
+    const kraken_symbol_translator_tests = b.addTest(.{
+        .name = "kraken_symbol_translator_test",
+        .root_module = kraken_symbol_translator_tests_mod,
+    });
     kraken_symbol_translator_tests.root_module.addImport("symbol_translator", symbol_translator_mod);
 
     // Spot executor tests
-    const kraken_spot_executor_tests = b.addTest(.{
-        .name = "kraken_spot_executor_test",
+    const kraken_spot_executor_tests_mod = b.createModule(.{
         .root_source_file = b.path("exchanges/kraken/spot/tests/executor_test.zig"),
         .target = target,
         .optimize = optimize,
+    });
+    const kraken_spot_executor_tests = b.addTest(.{
+        .name = "kraken_spot_executor_test",
+        .root_module = kraken_spot_executor_tests_mod,
     });
     kraken_spot_executor_tests.root_module.addImport("spot_executor", spot_executor_mod);
     kraken_spot_executor_tests.root_module.addImport("oms", oms_mod);
@@ -949,11 +1099,14 @@ pub fn build(b: *std.Build) void {
     // to avoid "file exists in multiple modules" when oms also imports order_types.
 
     // Futures executor tests
-    const kraken_futures_executor_tests = b.addTest(.{
-        .name = "kraken_futures_executor_test",
+    const kraken_futures_executor_tests_mod = b.createModule(.{
         .root_source_file = b.path("exchanges/kraken/futures/tests/executor_test.zig"),
         .target = target,
         .optimize = optimize,
+    });
+    const kraken_futures_executor_tests = b.addTest(.{
+        .name = "kraken_futures_executor_test",
+        .root_module = kraken_futures_executor_tests_mod,
     });
     kraken_futures_executor_tests.root_module.addImport("futures_executor", futures_executor_mod);
     kraken_futures_executor_tests.root_module.addImport("oms", oms_mod);
@@ -970,9 +1123,11 @@ pub fn build(b: *std.Build) void {
     test_kraken_step.dependOn(&run_kraken_spot_executor_tests.step);
     test_kraken_step.dependOn(&run_kraken_futures_executor_tests.step);
 
-    // ---- Trading Desk TUI executable ----
+    // ---- Trading Desk TUI ----
+    // Build steps: build-desk, run-desk, test-desk
+    // Release builds: zig build build-desk -Doptimize=ReleaseFast
 
-    // SDK core modules (not previously defined as build modules)
+    // SDK core modules for desk (not yet modularized elsewhere)
     const memory_mod = b.createModule(.{
         .root_source_file = b.path("sdk/core/memory.zig"),
     });
@@ -985,60 +1140,58 @@ pub fn build(b: *std.Build) void {
     const thread_mod = b.createModule(.{
         .root_source_file = b.path("sdk/core/io/thread.zig"),
     });
+    _ = thread_mod;
+
+    // Desk main module (Zig 0.15: addExecutable requires root_module)
+    const desk_main_mod = b.createModule(.{
+        .root_source_file = b.path("trading/desk/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    desk_main_mod.addImport("orderbook", orderbook_mod);
+    desk_main_mod.addImport("oms", oms_mod);
+    desk_main_mod.addImport("order_types", order_types_mod);
+    desk_main_mod.addImport("positions", positions_mod);
+    desk_main_mod.addImport("pre_trade", pre_trade_mod);
+    desk_main_mod.addImport("memory", memory_mod);
+    desk_main_mod.addImport("time", time_mod);
+    desk_main_mod.addImport("ring_buffer", ring_buffer_mod);
 
     // Desk executable
     const desk_exe = b.addExecutable(.{
         .name = "desk",
-        .root_source_file = b.path("trading/desk/main.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = desk_main_mod,
     });
-    desk_exe.root_module.addImport("orderbook", orderbook_mod);
-    desk_exe.root_module.addImport("oms", oms_mod);
-    desk_exe.root_module.addImport("order_types", order_types_mod);
-    desk_exe.root_module.addImport("positions", positions_mod);
-    desk_exe.root_module.addImport("pre_trade", pre_trade_mod);
-    desk_exe.root_module.addImport("memory", memory_mod);
-    desk_exe.root_module.addImport("time", time_mod);
-    desk_exe.root_module.addImport("ring_buffer", ring_buffer_mod);
-    desk_exe.root_module.addImport("thread", thread_mod);
-    desk_exe.root_module.addImport("spot_executor", spot_executor_mod);
     b.installArtifact(desk_exe);
 
-    // Build steps for desk
-    // build-desk: compile the desk executable
-    const build_desk_step = b.step("build-desk", "Build the trading desk TUI");
+    // build-desk step
+    const build_desk_step = b.step("build-desk", "Build the Trading Desk TUI");
     build_desk_step.dependOn(&desk_exe.step);
 
-    // run-desk: build and run
-    // For release builds, use: zig build run-desk -Doptimize=ReleaseFast
+    // run-desk step
     const run_desk = b.addRunArtifact(desk_exe);
-    const run_desk_step = b.step("run-desk", "Run the trading desk TUI");
+    const run_desk_step = b.step("run-desk", "Run the Trading Desk TUI");
     run_desk_step.dependOn(&run_desk.step);
-    if (b.args) |args| {
-        run_desk.addArgs(args);
-    }
 
-    // test-desk: run desk tests
-    const desk_tests = b.addTest(.{
-        .name = "desk_test",
+    // test-desk step (Zig 0.15: addTest requires root_module)
+    const desk_test_mod = b.createModule(.{
         .root_source_file = b.path("trading/desk/main.zig"),
         .target = target,
         .optimize = optimize,
     });
-    desk_tests.root_module.addImport("orderbook", orderbook_mod);
-    desk_tests.root_module.addImport("oms", oms_mod);
-    desk_tests.root_module.addImport("order_types", order_types_mod);
-    desk_tests.root_module.addImport("positions", positions_mod);
-    desk_tests.root_module.addImport("pre_trade", pre_trade_mod);
-    desk_tests.root_module.addImport("memory", memory_mod);
-    desk_tests.root_module.addImport("time", time_mod);
-    desk_tests.root_module.addImport("ring_buffer", ring_buffer_mod);
-    desk_tests.root_module.addImport("thread", thread_mod);
-    desk_tests.root_module.addImport("spot_executor", spot_executor_mod);
-
+    desk_test_mod.addImport("orderbook", orderbook_mod);
+    desk_test_mod.addImport("oms", oms_mod);
+    desk_test_mod.addImport("order_types", order_types_mod);
+    desk_test_mod.addImport("positions", positions_mod);
+    desk_test_mod.addImport("pre_trade", pre_trade_mod);
+    desk_test_mod.addImport("memory", memory_mod);
+    desk_test_mod.addImport("time", time_mod);
+    desk_test_mod.addImport("ring_buffer", ring_buffer_mod);
+    const desk_tests = b.addTest(.{
+        .name = "desk_test",
+        .root_module = desk_test_mod,
+    });
     const run_desk_tests = b.addRunArtifact(desk_tests);
-    const test_desk_step = b.step("test-desk", "Run trading desk tests");
+    const test_desk_step = b.step("test-desk", "Run Trading Desk TUI tests");
     test_desk_step.dependOn(&run_desk_tests.step);
-    test_step.dependOn(&run_desk_tests.step);
 }

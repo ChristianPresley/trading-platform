@@ -30,7 +30,15 @@ Your prompt contains:
 
 1. **Read the plan file fully** before making any changes.
 
-2. **For each assigned phase** (in order):
+2. **If `Include spec docs: true`** — commit the spec documents before implementing phases:
+   ```bash
+   cd {worktree-path}
+   git add .claude/specs/{slug}/
+   git commit -m "docs({slug}): add spec pipeline artifacts"
+   ```
+   This ensures all spec documents (questions, research, design, outline, plan, worktree doc) are tracked in version control as the first commit on this branch.
+
+3. **For each assigned phase** (in order):
 
    a. **Implement** all changes listed under that phase in the plan:
       - New files: create with the specified structure
@@ -50,7 +58,7 @@ Your prompt contains:
 
    d. **If reality diverges from plan** (file missing, interface changed, unexpected state): STOP. Report as an exception. Do NOT improvise or work around it.
 
-3. **After all phases complete**: commit all changes on the assigned branch:
+4. **After all phases complete**: commit all changes on the assigned branch:
    ```bash
    cd {worktree-path}
    git add -A

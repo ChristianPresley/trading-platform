@@ -1,4 +1,5 @@
-const std = @import("std");
+// Input handler for Trading Desk TUI.
+// Parses raw byte sequences into semantic Actions.
 
 pub const Action = union(enum) {
     tab: void,
@@ -23,94 +24,106 @@ const State = enum {
 
 pub const InputHandler = struct {
     state: State,
-    timeout_frames: u8, // frames since entering escape state
+    seq_buf: [8]u8,
+    seq_len: u8,
 
     pub fn init() InputHandler {
         return InputHandler{
             .state = .normal,
-            .timeout_frames = 0,
+            .seq_buf = undefined,
+            .seq_len = 0,
         };
     }
 
-    /// Call once per frame if no bytes available, to timeout escape sequences.
-    pub fn tickTimeout(self: *InputHandler) ?Action {
-        if (self.state == .escape) {
-            self.timeout_frames += 1;
-            if (self.timeout_frames > 2) { // ~2 frames = ~130ms
-                self.state = .normal;
-                self.timeout_frames = 0;
-                return .{ .escape = {} };
-            }
-        }
-        return null;
-    }
-
-    /// Feed a byte from stdin. Returns an Action if a complete key sequence is recognized.
-    pub fn feed(self: *InputHandler, byte: u8) ?Action {
+    /// Feed a byte from stdin. Returns an Action if one is complete, or null.
+    /// In order entry mode (text_mode = true), 'q' is treated as a char, not quit.
+    pub fn feed(self: *InputHandler, byte: u8, text_mode: bool) ?Action {
         switch (self.state) {
             .normal => {
-                return switch (byte) {
+                switch (byte) {
                     0x1b => { // ESC
                         self.state = .escape;
-                        self.timeout_frames = 0;
+                        self.seq_len = 0;
                         return null;
                     },
-                    0x03 => .{ .quit = {} }, // Ctrl+C
-                    0x09 => .{ .tab = {} }, // Tab
-                    0x0d => .{ .enter = {} }, // Enter
-                    0x7f, 0x08 => .{ .backspace = {} }, // Backspace / DEL
-                    0x15 => .{ .delete_line = {} }, // Ctrl+U
-                    0x20...0x7e => .{ .char = byte }, // Printable ASCII
-                    else => null,
-                };
+                    0x09 => return Action{ .tab = {} }, // Tab
+                    0x0d => return Action{ .enter = {} }, // Enter (CR)
+                    0x0a => return Action{ .enter = {} }, // Enter (LF)
+                    0x7f, 0x08 => return Action{ .backspace = {} }, // DEL / BS
+                    0x15 => return Action{ .delete_line = {} }, // Ctrl+U
+                    0x03 => return Action{ .quit = {} }, // Ctrl+C
+                    0x20...0x7e => |c| {
+                        // 'q' and 'Q' quit unless in text_mode
+                        if ((c == 'q' or c == 'Q') and !text_mode) {
+                            return Action{ .quit = {} };
+                        }
+                        return Action{ .char = c };
+                    },
+                    else => return null,
+                }
             },
             .escape => {
-                self.timeout_frames = 0;
                 if (byte == '[') {
                     self.state = .escape_bracket;
                     return null;
+                } else if (byte == 0x1b) {
+                    // Another ESC: emit escape for previous, start fresh
+                    return Action{ .escape = {} };
                 } else {
                     self.state = .normal;
-                    return .{ .escape = {} };
+                    // Check for shift-tab in some terminals: ESC + 'Z' without bracket
+                    if (byte == 'Z') return Action{ .shift_tab = {} };
+                    return Action{ .escape = {} };
                 }
             },
             .escape_bracket => {
                 self.state = .normal;
                 return switch (byte) {
-                    'A' => .{ .arrow_up = {} },
-                    'B' => .{ .arrow_down = {} },
-                    'C' => .{ .arrow_right = {} },
-                    'D' => .{ .arrow_left = {} },
-                    'Z' => .{ .shift_tab = {} }, // Shift+Tab = ESC [ Z
+                    'A' => Action{ .arrow_up = {} },
+                    'B' => Action{ .arrow_down = {} },
+                    'C' => Action{ .arrow_right = {} },
+                    'D' => Action{ .arrow_left = {} },
+                    'Z' => Action{ .shift_tab = {} },
                     else => null,
                 };
             },
         }
     }
+
+    /// Call at frame boundary if in escape state (implicit timeout).
+    pub fn frameReset(self: *InputHandler) ?Action {
+        if (self.state != .normal) {
+            self.state = .normal;
+            return Action{ .escape = {} };
+        }
+        return null;
+    }
 };
 
-test "input_handler_basic_keys" {
-    var handler = InputHandler.init();
-
-    // Regular char
-    const a = handler.feed('a');
+test "input_handler_arrows" {
+    const std = @import("std");
+    var ih = InputHandler.init();
+    // Arrow up: ESC [ A
+    try std.testing.expect(ih.feed(0x1b, false) == null);
+    try std.testing.expect(ih.feed('[', false) == null);
+    const a = ih.feed('A', false);
     try std.testing.expect(a != null);
-    switch (a.?) {
-        .char => |c| try std.testing.expectEqual(@as(u8, 'a'), c),
-        else => return error.TestUnexpectedResult,
-    }
+    try std.testing.expect(a.? == .arrow_up);
+}
 
-    // Enter
-    const enter = handler.feed(0x0d);
-    try std.testing.expect(enter != null);
+test "input_handler_quit" {
+    const std = @import("std");
+    var ih = InputHandler.init();
+    const a = ih.feed('q', false);
+    try std.testing.expect(a != null);
+    try std.testing.expect(a.? == .quit);
+}
 
-    // Arrow key sequence: ESC [ A
-    try std.testing.expect(handler.feed(0x1b) == null);
-    try std.testing.expect(handler.feed('[') == null);
-    const arrow = handler.feed('A');
-    try std.testing.expect(arrow != null);
-    switch (arrow.?) {
-        .arrow_up => {},
-        else => return error.TestUnexpectedResult,
-    }
+test "input_handler_q_in_text_mode" {
+    const std = @import("std");
+    var ih = InputHandler.init();
+    const a = ih.feed('q', true);
+    try std.testing.expect(a != null);
+    try std.testing.expect(a.? == .char);
+    try std.testing.expect(a.?.char == 'q');
 }
