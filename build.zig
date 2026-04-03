@@ -129,4 +129,82 @@ pub fn build(b: *std.Build) void {
     test_core_step.dependOn(&run_time_tests.step);
     test_core_step.dependOn(&run_containers_tests.step);
     test_core_step.dependOn(&run_crypto_tests.step);
+
+    // ---- sdk/protocol tests ----
+    const test_protocol_step = b.step("test-protocol", "Run sdk/protocol tests");
+
+    // JSON module
+    const json_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/protocol/json.zig"),
+    });
+
+    // TLS modules (names must match @import() calls in source files)
+    const tls_record_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/protocol/tls/record.zig"),
+    });
+    const x509_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/protocol/tls/x509.zig"),
+    });
+    const tls_client_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/protocol/tls/client.zig"),
+    });
+    // tls_client.zig uses @import("record") and @import("x509")
+    tls_client_mod.addImport("record", tls_record_mod);
+    tls_client_mod.addImport("x509", x509_mod);
+
+    // HTTP modules (names must match @import() calls in source files)
+    const http_url_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/protocol/http/url.zig"),
+    });
+    const http_chunked_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/protocol/http/chunked.zig"),
+    });
+    const http_client_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/protocol/http/client.zig"),
+    });
+    http_client_mod.addImport("url", http_url_mod);
+    http_client_mod.addImport("chunked", http_chunked_mod);
+
+    // JSON tests
+    const proto_json_tests = b.addTest(.{
+        .name = "json_test",
+        .root_source_file = b.path("sdk/protocol/tests/json_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    proto_json_tests.root_module.addImport("json", json_mod);
+
+    // TLS tests (import names match @import() in tls_test.zig)
+    const proto_tls_tests = b.addTest(.{
+        .name = "tls_test",
+        .root_source_file = b.path("sdk/protocol/tests/tls_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    proto_tls_tests.root_module.addImport("record", tls_record_mod);
+    proto_tls_tests.root_module.addImport("x509", x509_mod);
+    proto_tls_tests.root_module.addImport("tls_client", tls_client_mod);
+
+    // HTTP tests (import names match @import() in http_test.zig)
+    const proto_http_tests = b.addTest(.{
+        .name = "http_test",
+        .root_source_file = b.path("sdk/protocol/tests/http_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    proto_http_tests.root_module.addImport("url", http_url_mod);
+    proto_http_tests.root_module.addImport("chunked", http_chunked_mod);
+    proto_http_tests.root_module.addImport("http_client", http_client_mod);
+
+    const run_proto_json_tests = b.addRunArtifact(proto_json_tests);
+    const run_proto_tls_tests = b.addRunArtifact(proto_tls_tests);
+    const run_proto_http_tests = b.addRunArtifact(proto_http_tests);
+
+    test_step.dependOn(&run_proto_json_tests.step);
+    test_step.dependOn(&run_proto_tls_tests.step);
+    test_step.dependOn(&run_proto_http_tests.step);
+
+    test_protocol_step.dependOn(&run_proto_json_tests.step);
+    test_protocol_step.dependOn(&run_proto_tls_tests.step);
+    test_protocol_step.dependOn(&run_proto_http_tests.step);
 }
