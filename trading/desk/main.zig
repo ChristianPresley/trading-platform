@@ -11,6 +11,7 @@ const OrderbookSnapshot = msg.OrderbookSnapshot;
 const PositionUpdate = msg.PositionUpdate;
 const OrderUpdate = msg.OrderUpdate;
 const StatusUpdate = msg.StatusUpdate;
+const CandleUpdate = msg.CandleUpdate;
 const Engine = @import("engine.zig").Engine;
 const input_mod = @import("input.zig");
 const InputHandler = input_mod.InputHandler;
@@ -72,6 +73,8 @@ pub fn main() !void {
     var orders_buf: [MAX_ORDERS]OrderUpdate = undefined;
     var orders_count: usize = 0;
     var latest_status = std.mem.zeroes(StatusUpdate);
+    var candle_history: [2][64]CandleUpdate = undefined;
+    var candle_counts: [2]usize = .{ 0, 0 };
     var engine_stopped = false;
     var ticks_since_event: u32 = 0;
 
@@ -88,6 +91,9 @@ pub fn main() !void {
     const orders_scroll: i32 = 0;
     _ = orderbook_scroll;
     _ = orders_scroll;
+    // Candle history populated by engine events; rendering wired in Phase 4
+    _ = &candle_history;
+    _ = &candle_counts;
 
     while (!terminal_mod.signal_received) {
         // Check for resize
@@ -149,6 +155,20 @@ pub fn main() !void {
                 },
                 .status => |s| {
                     latest_status = s;
+                },
+                .candle_update => |cu| {
+                    // Determine instrument index by matching instrument name
+                    var idx: usize = 0;
+                    for (0..2) |i| {
+                        if (std.mem.eql(u8, orderbook_snap[i].instrument.slice(), cu.instrument.slice())) {
+                            idx = i;
+                            break;
+                        }
+                    }
+                    // Append to ring buffer (overwrite oldest if at 64)
+                    const slot = candle_counts[idx] % 64;
+                    candle_history[idx][slot] = cu;
+                    candle_counts[idx] += 1;
                 },
                 .shutdown_ack => {
                     engine_stopped = true;
