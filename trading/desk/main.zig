@@ -79,6 +79,10 @@ pub fn main() !void {
     var engine_stopped = false;
     var ticks_since_event: u32 = 0;
     var show_positions_overlay: bool = false;
+    var bbo_history: [2][128]i64 = undefined;
+    var bbo_history_count: [2]usize = .{ 0, 0 };
+    var frame_count: u64 = 0;
+    var order_arrival_frame: [MAX_ORDERS]u64 = std.mem.zeroes([MAX_ORDERS]u64);
 
     // Input and focus state
     var input_handler = InputHandler.init();
@@ -116,6 +120,13 @@ pub fn main() !void {
                             orderbook_snap[i].bid_count == 0)
                         {
                             orderbook_snap[i] = snap;
+                            // Update BBO midpoint history if both sides exist
+                            if (snap.bid_count > 0 and snap.ask_count > 0) {
+                                const midpoint = @divTrunc(snap.bids[0].price + snap.asks[0].price, 2);
+                                const slot = bbo_history_count[i] % 128;
+                                bbo_history[i][slot] = midpoint;
+                                bbo_history_count[i] += 1;
+                            }
                             break;
                         }
                     }
@@ -139,6 +150,7 @@ pub fn main() !void {
                     for (0..orders_count) |i| {
                         if (orders_buf[i].id == ou.id) {
                             orders_buf[i] = ou;
+                            order_arrival_frame[i] = frame_count;
                             found = true;
                             break;
                         }
@@ -146,10 +158,15 @@ pub fn main() !void {
                     if (!found) {
                         if (orders_count < MAX_ORDERS) {
                             orders_buf[orders_count] = ou;
+                            order_arrival_frame[orders_count] = frame_count;
                             orders_count += 1;
                         } else {
-                            for (0..MAX_ORDERS - 1) |i| orders_buf[i] = orders_buf[i + 1];
+                            for (0..MAX_ORDERS - 1) |i| {
+                                orders_buf[i] = orders_buf[i + 1];
+                                order_arrival_frame[i] = order_arrival_frame[i + 1];
+                            }
                             orders_buf[MAX_ORDERS - 1] = ou;
+                            order_arrival_frame[MAX_ORDERS - 1] = frame_count;
                         }
                     }
                 },
@@ -194,7 +211,8 @@ pub fn main() !void {
         if (active_panel == PANEL_ORDERBOOK) {
             renderer.writeRawPub("\x1b[1m");
         }
-        orderbook_panel.draw(&renderer, panels.orderbook, &orderbook_snap[active_instrument], theme);
+        const bbo_len = @min(bbo_history_count[active_instrument], 128);
+        orderbook_panel.draw(&renderer, panels.orderbook, &orderbook_snap[active_instrument], bbo_history[active_instrument][0..bbo_len], theme);
         if (active_panel == PANEL_ORDERBOOK) {
             renderer.writeRawPub("\x1b[0m");
         }
@@ -208,7 +226,7 @@ pub fn main() !void {
 
         // Recent orders panel
         if (active_panel == PANEL_RECENT_ORDERS) renderer.writeRawPub("\x1b[1m");
-        orders_panel.draw(&renderer, panels.recent_orders, orders_buf[0..orders_count], theme);
+        orders_panel.draw(&renderer, panels.recent_orders, orders_buf[0..orders_count], frame_count, theme);
         if (active_panel == PANEL_RECENT_ORDERS) renderer.writeRawPub("\x1b[0m");
 
         // Status bar
@@ -220,7 +238,8 @@ pub fn main() !void {
         } else if (engine_stopped) {
             renderer.drawText(panels.status_bar.x, panels.status_bar.y, "Engine stopped | q=quit | Tab=switch panel");
         } else {
-            status_panel.draw(&renderer, panels.status_bar, &latest_status, theme);
+            const status_age: u32 = if (status_msg_frames < 45) 45 - status_msg_frames else 0;
+            status_panel.draw(&renderer, panels.status_bar, &latest_status, status_age, theme);
         }
 
         // Positions overlay (drawn on top of all panels when toggled with 'p')
@@ -252,6 +271,7 @@ pub fn main() !void {
 
         if (goto_done) break;
 
+        frame_count += 1;
         std.Thread.sleep(66_000_000); // ~15 FPS
     }
 
