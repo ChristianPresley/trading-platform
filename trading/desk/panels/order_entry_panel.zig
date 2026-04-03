@@ -9,6 +9,7 @@ const UserCommand = msg.UserCommand;
 const OrderRequest = msg.OrderRequest;
 const InstrumentId = msg.InstrumentId;
 const Action = @import("../input.zig").Action;
+const Theme = @import("../theme.zig").Theme;
 
 pub const TextField = struct {
     buf: [32]u8,
@@ -142,9 +143,9 @@ pub const OrderEntryPanel = struct {
         } };
     }
 
-    pub fn draw(self: *const OrderEntryPanel, renderer: *Renderer, rect: Rect, active: bool) void {
+    pub fn draw(self: *const OrderEntryPanel, renderer: *Renderer, rect: Rect, active: bool, theme: *const Theme) void {
         const title = if (active) "Order Entry [ACTIVE]" else "Order Entry";
-        renderer.drawBox(rect, title);
+        renderer.drawBoxThemed(rect, title, theme);
 
         if (rect.h < 4 or rect.w < 25) return;
 
@@ -159,10 +160,13 @@ pub const OrderEntryPanel = struct {
             const value = self.fields[i].slice();
 
             if (active and self.active_field == i) {
-                // Highlight active field with inverse video
-                renderer.writeFmt("\x1b[{d};{d}H\x1b[7m{s:<12}\x1b[0m {s}", .{
-                    row + 1, inner_x + 1, label, value,
-                });
+                // Highlight active field with theme active_field background color
+                renderer.writeFmt("\x1b[{d};{d}H", .{ row + 1, inner_x + 1 });
+                renderer.writeBgColor(theme.active_field);
+                renderer.writeColor(theme.text);
+                renderer.writeFmt("{s:<12}", .{label});
+                renderer.resetColor();
+                renderer.writeFmt(" {s}", .{value});
             } else {
                 renderer.writeFmt("\x1b[{d};{d}H{s:<12} {s}", .{
                     row + 1, inner_x + 1, label, value,

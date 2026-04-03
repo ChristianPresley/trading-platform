@@ -1156,24 +1156,25 @@ pub fn build(b: *std.Build) void {
     desk_main_mod.addImport("memory", memory_mod);
     desk_main_mod.addImport("time", time_mod);
     desk_main_mod.addImport("ring_buffer", ring_buffer_mod);
+    desk_main_mod.addImport("bar_aggregator", bar_aggregator_mod);
 
-    // Desk executable
+    // Desk TUI executable
     const desk_exe = b.addExecutable(.{
-        .name = "desk",
+        .name = "desk-tui",
         .root_module = desk_main_mod,
     });
     b.installArtifact(desk_exe);
 
-    // build-desk step
-    const build_desk_step = b.step("build-desk", "Build the Trading Desk TUI");
-    build_desk_step.dependOn(&desk_exe.step);
+    // build-desk-tui step
+    const build_desk_tui_step = b.step("build-desk-tui", "Build the Trading Desk TUI");
+    build_desk_tui_step.dependOn(&desk_exe.step);
 
-    // run-desk step
+    // run-desk-tui step
     const run_desk = b.addRunArtifact(desk_exe);
-    const run_desk_step = b.step("run-desk", "Run the Trading Desk TUI");
-    run_desk_step.dependOn(&run_desk.step);
+    const run_desk_tui_step = b.step("run-desk-tui", "Run the Trading Desk TUI");
+    run_desk_tui_step.dependOn(&run_desk.step);
 
-    // test-desk step (Zig 0.15: addTest requires root_module)
+    // test-desk-tui step (Zig 0.15: addTest requires root_module)
     const desk_test_mod = b.createModule(.{
         .root_source_file = b.path("trading/desk/main.zig"),
         .target = target,
@@ -1187,11 +1188,73 @@ pub fn build(b: *std.Build) void {
     desk_test_mod.addImport("memory", memory_mod);
     desk_test_mod.addImport("time", time_mod);
     desk_test_mod.addImport("ring_buffer", ring_buffer_mod);
+    desk_test_mod.addImport("bar_aggregator", bar_aggregator_mod);
     const desk_tests = b.addTest(.{
-        .name = "desk_test",
+        .name = "desk_tui_test",
         .root_module = desk_test_mod,
     });
     const run_desk_tests = b.addRunArtifact(desk_tests);
-    const test_desk_step = b.step("test-desk", "Run Trading Desk TUI tests");
-    test_desk_step.dependOn(&run_desk_tests.step);
+    const test_desk_tui_step = b.step("test-desk-tui", "Run Trading Desk TUI tests");
+    test_desk_tui_step.dependOn(&run_desk_tests.step);
+
+    // Backward-compat aliases for desk steps
+    b.step("build-desk", "Build desk (alias for build-desk-tui)").dependOn(build_desk_tui_step);
+    b.step("run-desk", "Run desk (alias for run-desk-tui)").dependOn(run_desk_tui_step);
+    b.step("test-desk", "Run desk tests (alias for test-desk-tui)").dependOn(test_desk_tui_step);
+
+    // ---- Trading Desk Headless ----
+    // Headless executable: engine without terminal dependency, push/pop API.
+
+    const headless_main_mod = b.createModule(.{
+        .root_source_file = b.path("trading/desk/headless_main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    headless_main_mod.addImport("orderbook", orderbook_mod);
+    headless_main_mod.addImport("oms", oms_mod);
+    headless_main_mod.addImport("order_types", order_types_mod);
+    headless_main_mod.addImport("positions", positions_mod);
+    headless_main_mod.addImport("pre_trade", pre_trade_mod);
+    headless_main_mod.addImport("memory", memory_mod);
+    headless_main_mod.addImport("time", time_mod);
+    headless_main_mod.addImport("ring_buffer", ring_buffer_mod);
+    headless_main_mod.addImport("bar_aggregator", bar_aggregator_mod);
+
+    const desk_headless_exe = b.addExecutable(.{
+        .name = "desk-headless",
+        .root_module = headless_main_mod,
+    });
+    b.installArtifact(desk_headless_exe);
+
+    // build-desk-headless step
+    const build_desk_headless_step = b.step("build-desk-headless", "Build the Trading Desk Headless");
+    build_desk_headless_step.dependOn(&desk_headless_exe.step);
+
+    // run-desk-headless step
+    const run_desk_headless = b.addRunArtifact(desk_headless_exe);
+    const run_desk_headless_step = b.step("run-desk-headless", "Run the Trading Desk Headless");
+    run_desk_headless_step.dependOn(&run_desk_headless.step);
+
+    // test-desk-headless step
+    const headless_test_mod = b.createModule(.{
+        .root_source_file = b.path("trading/desk/headless_main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    headless_test_mod.addImport("orderbook", orderbook_mod);
+    headless_test_mod.addImport("oms", oms_mod);
+    headless_test_mod.addImport("order_types", order_types_mod);
+    headless_test_mod.addImport("positions", positions_mod);
+    headless_test_mod.addImport("pre_trade", pre_trade_mod);
+    headless_test_mod.addImport("memory", memory_mod);
+    headless_test_mod.addImport("time", time_mod);
+    headless_test_mod.addImport("ring_buffer", ring_buffer_mod);
+    headless_test_mod.addImport("bar_aggregator", bar_aggregator_mod);
+    const headless_tests = b.addTest(.{
+        .name = "desk_headless_test",
+        .root_module = headless_test_mod,
+    });
+    const run_headless_tests = b.addRunArtifact(headless_tests);
+    const test_desk_headless_step = b.step("test-desk-headless", "Run Trading Desk Headless tests");
+    test_desk_headless_step.dependOn(&run_headless_tests.step);
 }

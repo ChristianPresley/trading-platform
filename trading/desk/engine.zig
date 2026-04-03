@@ -9,12 +9,15 @@ const UserCommand = msg.UserCommand;
 const OrderbookSnapshot = msg.OrderbookSnapshot;
 const PriceLevel = msg.PriceLevel;
 const InstrumentId = msg.InstrumentId;
+const CandleUpdate = msg.CandleUpdate;
 
 const SyntheticFeed = @import("synthetic.zig").SyntheticFeed;
 const L2Book = @import("orderbook").L2Book;
 const oms_mod = @import("oms");
 const OrderManager = oms_mod.OrderManager;
 const Order = oms_mod.Order;
+const bar_agg = @import("bar_aggregator");
+const BarAggregator = bar_agg.BarAggregator;
 
 const INSTRUMENTS = [_][]const u8{ "BTC-USD", "ETH-USD" };
 
@@ -55,6 +58,9 @@ pub const Engine = struct {
     feed: SyntheticFeed,
     oms: OrderManager,
 
+    // Candle aggregators (one per instrument)
+    candle_aggs: [2]BarAggregator,
+
     // Simple position tracking
     positions: [16]SimplePosition,
     position_count: usize,
@@ -88,6 +94,10 @@ pub const Engine = struct {
             .tick = 0,
             .feed = feed,
             .oms = oms,
+            .candle_aggs = .{
+                BarAggregator.init(60_000_000_000), // 1-minute bars in ns
+                BarAggregator.init(60_000_000_000),
+            },
             .positions = undefined,
             .position_count = 0,
         };
@@ -99,7 +109,7 @@ pub const Engine = struct {
     }
 
     /// Snapshot the L2Book into an OrderbookSnapshot message.
-    fn snapshotBook(book: *const L2Book, instrument: []const u8) OrderbookSnapshot {
+    pub fn snapshotBook(book: *const L2Book, instrument: []const u8) OrderbookSnapshot {
         var snap = OrderbookSnapshot{
             .instrument = InstrumentId.fromSlice(instrument),
             .bids = undefined,
@@ -138,11 +148,31 @@ pub const Engine = struct {
             // Advance synthetic feed
             self.feed.tick();
 
-            // Push orderbook snapshots for each instrument
+            // Compute timestamp for this tick (tick count x 100ms in ns)
+            const timestamp_ns: u64 = self.tick * 100_000_000;
+
+            // Push orderbook snapshots and aggregate candles for each instrument
             for (0..2) |i| {
                 const book = self.feed.getBook(i);
                 const snap = snapshotBook(book, INSTRUMENTS[i]);
                 _ = self.to_tui.push(EngineEvent{ .orderbook_snapshot = snap });
+
+                // Compute BBO midpoint and feed to candle aggregator (skip if book is empty)
+                if (snap.bid_count > 0 and snap.ask_count > 0) {
+                    const midpoint = @divTrunc(snap.bids[0].price + snap.asks[0].price, 2);
+                    if (self.candle_aggs[i].onTrade(midpoint, 1, @as(u128, timestamp_ns))) |bar| {
+                        const cu = CandleUpdate{
+                            .instrument = snap.instrument,
+                            .open = bar.open,
+                            .high = bar.high,
+                            .low = bar.low,
+                            .close = bar.close,
+                            .volume = bar.volume,
+                            .timestamp = @truncate(bar.timestamp),
+                        };
+                        _ = self.to_tui.push(EngineEvent{ .candle_update = cu });
+                    }
+                }
             }
 
             // Push position updates
@@ -277,4 +307,59 @@ test "engine_init_and_deinit" {
     defer engine.deinit();
 
     try std.testing.expect(engine.tick == 0);
+}
+
+test "engine_candle_aggregation" {
+    const SpscRB = SpscRingBuffer(EngineEvent);
+    const SpscRBCmd = SpscRingBuffer(UserCommand);
+
+    var to_tui = try SpscRB.init(std.testing.allocator, 4096);
+    defer to_tui.deinit();
+    var from_tui = try SpscRBCmd.init(std.testing.allocator, 16);
+    defer from_tui.deinit();
+
+    var engine = try Engine.init(std.testing.allocator, &to_tui, &from_tui);
+    defer engine.deinit();
+
+    // 1-minute bar = 60_000_000_000 ns, each tick = 100_000_000 ns => 600 ticks per bar.
+    // Run engine tick logic directly (without Thread.sleep) for 601 ticks to cross bar boundary.
+    // We replicate the tick logic inline to avoid spawning a thread with sleep.
+    const ticks_needed: usize = 601;
+    for (0..ticks_needed) |_| {
+        engine.tick += 1;
+        engine.feed.tick();
+        const timestamp_ns: u64 = engine.tick * 100_000_000;
+        for (0..2) |i| {
+            const book = engine.feed.getBook(i);
+            const snap = Engine.snapshotBook(book, INSTRUMENTS[i]);
+            _ = to_tui.push(EngineEvent{ .orderbook_snapshot = snap });
+            if (snap.bid_count > 0 and snap.ask_count > 0) {
+                const midpoint = @divTrunc(snap.bids[0].price + snap.asks[0].price, 2);
+                if (engine.candle_aggs[i].onTrade(midpoint, 1, @as(u128, timestamp_ns))) |bar| {
+                    const cu = CandleUpdate{
+                        .instrument = snap.instrument,
+                        .open = bar.open,
+                        .high = bar.high,
+                        .low = bar.low,
+                        .close = bar.close,
+                        .volume = bar.volume,
+                        .timestamp = @truncate(bar.timestamp),
+                    };
+                    _ = to_tui.push(EngineEvent{ .candle_update = cu });
+                }
+            }
+        }
+    }
+
+    // Drain events and look for at least one candle_update
+    var found_candle = false;
+    while (to_tui.pop()) |event| {
+        switch (event) {
+            .candle_update => {
+                found_candle = true;
+            },
+            else => {},
+        }
+    }
+    try std.testing.expect(found_candle);
 }

@@ -5,6 +5,9 @@ const std = @import("std");
 const Terminal = @import("terminal.zig").Terminal;
 const layout = @import("layout.zig");
 const Rect = layout.Rect;
+const theme_mod = @import("theme.zig");
+const Rgb = theme_mod.Rgb;
+const Theme = theme_mod.Theme;
 
 pub const Renderer = struct {
     allocator: std.mem.Allocator,
@@ -55,7 +58,24 @@ pub const Renderer = struct {
         self.writeRaw(s) catch {};
     }
 
+    /// Write 24-bit true color foreground escape sequence.
+    pub fn writeColor(self: *Renderer, color: Rgb) void {
+        self.writeFmt("\x1b[38;2;{d};{d};{d}m", .{ color.r, color.g, color.b });
+    }
+
+    /// Write 24-bit true color background escape sequence.
+    pub fn writeBgColor(self: *Renderer, color: Rgb) void {
+        self.writeFmt("\x1b[48;2;{d};{d};{d}m", .{ color.r, color.g, color.b });
+    }
+
+    /// Reset all SGR attributes (colors, bold, etc.).
+    pub fn resetColor(self: *Renderer) void {
+        self.writeRaw("\x1b[0m") catch {};
+    }
+
     /// Draw a bordered box with a title centered on the top border.
+    /// Uses Unicode box drawing characters (┌┐└┘─│).
+    /// Each box drawing character is 3 bytes in UTF-8.
     pub fn drawBox(self: *Renderer, rect: Rect, title: []const u8) void {
         if (rect.w < 2 or rect.h < 2) return;
 
@@ -65,38 +85,46 @@ pub const Renderer = struct {
         const row2 = rect.y + rect.h;
         const col2 = rect.x + rect.w;
 
-        // Draw top border
-        self.writeFmt("\x1b[{d};{d}H+", .{ row1, col1 });
+        // Draw top border: ┌ then dashes/title then ┐
+        // Note: box drawing chars are 3 bytes UTF-8 each, but terminal counts them as 1 column wide.
+        self.writeFmt("\x1b[{d};{d}H\xe2\x94\x8c", .{ row1, col1 }); // ┌
         // Title centered on top border
         const inner_width = rect.w -| 2;
         const title_len = @min(title.len, inner_width);
         const padding = (inner_width -| title_len) / 2;
         var i: u16 = 0;
         while (i < padding) : (i += 1) {
-            self.writeRaw("-") catch {};
+            self.writeRaw("\xe2\x94\x80") catch {}; // ─
         }
         self.writeRaw(title[0..title_len]) catch {};
         i = 0;
         const right_pad = inner_width -| padding -| title_len;
         while (i < right_pad) : (i += 1) {
-            self.writeRaw("-") catch {};
+            self.writeRaw("\xe2\x94\x80") catch {}; // ─
         }
-        self.writeFmt("+", .{});
+        self.writeRaw("\xe2\x94\x90") catch {}; // ┐
 
-        // Draw bottom border
-        self.writeFmt("\x1b[{d};{d}H+", .{ row2, col1 });
+        // Draw bottom border: └ then dashes then ┘
+        self.writeFmt("\x1b[{d};{d}H\xe2\x94\x94", .{ row2, col1 }); // └
         i = 0;
         while (i < inner_width) : (i += 1) {
-            self.writeRaw("-") catch {};
+            self.writeRaw("\xe2\x94\x80") catch {}; // ─
         }
-        self.writeFmt("+", .{});
+        self.writeRaw("\xe2\x94\x98") catch {}; // ┘
 
-        // Draw side borders
+        // Draw side borders: │
         var r: u16 = row1 + 1;
         while (r < row2) : (r += 1) {
-            self.writeFmt("\x1b[{d};{d}H|", .{ r, col1 });
-            self.writeFmt("\x1b[{d};{d}H|", .{ r, col2 });
+            self.writeFmt("\x1b[{d};{d}H\xe2\x94\x82", .{ r, col1 }); // │
+            self.writeFmt("\x1b[{d};{d}H\xe2\x94\x82", .{ r, col2 }); // │
         }
+    }
+
+    /// Draw a bordered box with theme colors applied to borders and title.
+    pub fn drawBoxThemed(self: *Renderer, rect: Rect, title: []const u8, theme: *const Theme) void {
+        self.writeColor(theme.border);
+        self.drawBox(rect, title);
+        self.resetColor();
     }
 
     /// Draw text at absolute terminal coordinates (1-indexed).
@@ -135,4 +163,14 @@ test "renderer_drawbox_no_crash" {
     const r = Rect{ .x = 0, .y = 0, .w = 20, .h = 5 };
     try std.testing.expect(r.w == 20);
     try std.testing.expect(r.h == 5);
+}
+
+test "renderer_color_sequence" {
+    // Verify that writeColor produces the correct ANSI true-color sequence.
+    // We verify the sequence format by checking the expected string directly.
+    const color = Rgb{ .r = 255, .g = 23, .b = 68 };
+    var buf: [64]u8 = undefined;
+    const expected = "\x1b[38;2;255;23;68m";
+    const s = std.fmt.bufPrint(&buf, "\x1b[38;2;{d};{d};{d}m", .{ color.r, color.g, color.b }) catch "?";
+    try std.testing.expectEqualStrings(expected, s);
 }

@@ -63,12 +63,23 @@ pub const StatusUpdate = struct {
     connected: bool,
 };
 
+pub const CandleUpdate = struct {
+    instrument: InstrumentId,
+    open: i64,
+    high: i64,
+    low: i64,
+    close: i64,
+    volume: i64,
+    timestamp: u64,
+};
+
 pub const EngineEvent = union(enum) {
     tick: u64,
     orderbook_snapshot: OrderbookSnapshot,
     position_update: PositionUpdate,
     order_update: OrderUpdate,
     status: StatusUpdate,
+    candle_update: CandleUpdate,
     shutdown_ack: void,
 };
 
@@ -85,4 +96,5 @@ test "messages_sizes" {
     try std.testing.expect(@sizeOf(EngineEvent) > 0);
     try std.testing.expect(@sizeOf(UserCommand) > 0);
     try std.testing.expect(@sizeOf(OrderbookSnapshot) > 0);
+    try std.testing.expect(@sizeOf(CandleUpdate) > 0);
 }

@@ -6,9 +6,10 @@ const layout = @import("../layout.zig");
 const Rect = layout.Rect;
 const msg = @import("../messages.zig");
 const PositionUpdate = msg.PositionUpdate;
+const Theme = @import("../theme.zig").Theme;
 
-pub fn draw(renderer: *Renderer, rect: Rect, positions: []const PositionUpdate) void {
-    renderer.drawBox(rect, "Positions");
+pub fn draw(renderer: *Renderer, rect: Rect, positions: []const PositionUpdate, theme: *const Theme) void {
+    renderer.drawBoxThemed(rect, "Positions", theme);
 
     if (rect.h < 3 or rect.w < 30) return;
 
@@ -32,17 +33,21 @@ pub fn draw(renderer: *Renderer, rect: Rect, positions: []const PositionUpdate) 
         const avg_str = std.fmt.bufPrint(&avg_buf, "{d}", .{avg_whole}) catch "?";
 
         const pnl_positive = pos.unrealized_pnl >= 0;
-        const pnl_color = if (pnl_positive) "\x1b[32m" else "\x1b[31m";
         const pnl_whole = @divTrunc(pos.unrealized_pnl, 100_000_000);
 
-        renderer.writeFmt("\x1b[{d};{d}H{s:<12}{d:>8}{s:>12}{s}{d:>12}\x1b[0m", .{
+        renderer.writeFmt("\x1b[{d};{d}H{s:<12}{d:>8}{s:>12}", .{
             row + 1, inner_x + 1,
             pos.instrument.slice(),
             @divTrunc(pos.quantity, 100_000_000),
             avg_str,
-            pnl_color,
-            pnl_whole,
         });
+        if (pnl_positive) {
+            renderer.writeColor(theme.bid);
+        } else {
+            renderer.writeColor(theme.ask);
+        }
+        renderer.writeFmt("{d:>12}", .{pnl_whole});
+        renderer.resetColor();
     }
 
     if (positions.len == 0) {
