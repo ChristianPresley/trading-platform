@@ -1201,4 +1201,60 @@ pub fn build(b: *std.Build) void {
     b.step("build-desk", "Build desk (alias for build-desk-tui)").dependOn(build_desk_tui_step);
     b.step("run-desk", "Run desk (alias for run-desk-tui)").dependOn(run_desk_tui_step);
     b.step("test-desk", "Run desk tests (alias for test-desk-tui)").dependOn(test_desk_tui_step);
+
+    // ---- Trading Desk Headless ----
+    // Headless executable: engine without terminal dependency, push/pop API.
+
+    const headless_main_mod = b.createModule(.{
+        .root_source_file = b.path("trading/desk/headless_main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    headless_main_mod.addImport("orderbook", orderbook_mod);
+    headless_main_mod.addImport("oms", oms_mod);
+    headless_main_mod.addImport("order_types", order_types_mod);
+    headless_main_mod.addImport("positions", positions_mod);
+    headless_main_mod.addImport("pre_trade", pre_trade_mod);
+    headless_main_mod.addImport("memory", memory_mod);
+    headless_main_mod.addImport("time", time_mod);
+    headless_main_mod.addImport("ring_buffer", ring_buffer_mod);
+    headless_main_mod.addImport("bar_aggregator", bar_aggregator_mod);
+
+    const desk_headless_exe = b.addExecutable(.{
+        .name = "desk-headless",
+        .root_module = headless_main_mod,
+    });
+    b.installArtifact(desk_headless_exe);
+
+    // build-desk-headless step
+    const build_desk_headless_step = b.step("build-desk-headless", "Build the Trading Desk Headless");
+    build_desk_headless_step.dependOn(&desk_headless_exe.step);
+
+    // run-desk-headless step
+    const run_desk_headless = b.addRunArtifact(desk_headless_exe);
+    const run_desk_headless_step = b.step("run-desk-headless", "Run the Trading Desk Headless");
+    run_desk_headless_step.dependOn(&run_desk_headless.step);
+
+    // test-desk-headless step
+    const headless_test_mod = b.createModule(.{
+        .root_source_file = b.path("trading/desk/headless_main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    headless_test_mod.addImport("orderbook", orderbook_mod);
+    headless_test_mod.addImport("oms", oms_mod);
+    headless_test_mod.addImport("order_types", order_types_mod);
+    headless_test_mod.addImport("positions", positions_mod);
+    headless_test_mod.addImport("pre_trade", pre_trade_mod);
+    headless_test_mod.addImport("memory", memory_mod);
+    headless_test_mod.addImport("time", time_mod);
+    headless_test_mod.addImport("ring_buffer", ring_buffer_mod);
+    headless_test_mod.addImport("bar_aggregator", bar_aggregator_mod);
+    const headless_tests = b.addTest(.{
+        .name = "desk_headless_test",
+        .root_module = headless_test_mod,
+    });
+    const run_headless_tests = b.addRunArtifact(headless_tests);
+    const test_desk_headless_step = b.step("test-desk-headless", "Run Trading Desk Headless tests");
+    test_desk_headless_step.dependOn(&run_headless_tests.step);
 }
