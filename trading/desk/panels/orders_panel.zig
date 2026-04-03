@@ -6,12 +6,13 @@ const layout = @import("../layout.zig");
 const Rect = layout.Rect;
 const msg = @import("../messages.zig");
 const OrderUpdate = msg.OrderUpdate;
+const Theme = @import("../theme.zig").Theme;
 
 const STATUS_NAMES = [_][]const u8{ "Pending", "New", "Filled", "Cancelled", "Rejected" };
 const SIDE_NAMES = [_][]const u8{ "Buy", "Sell" };
 
-pub fn draw(renderer: *Renderer, rect: Rect, orders: []const OrderUpdate) void {
-    renderer.drawBox(rect, "Recent Orders");
+pub fn draw(renderer: *Renderer, rect: Rect, orders: []const OrderUpdate, theme: *const Theme) void {
+    renderer.drawBoxThemed(rect, "Recent Orders", theme);
 
     if (rect.h < 3 or rect.w < 30) return;
 
