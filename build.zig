@@ -747,4 +747,66 @@ pub fn build(b: *std.Build) void {
 
     test_kraken_step.dependOn(&run_kraken_spot_ws_tests.step);
     test_kraken_step.dependOn(&run_kraken_futures_ws_tests.step);
+
+    // ---- Phase 7: Kraken Order Execution End-to-End ----
+
+    // Symbol translator module
+    const symbol_translator_mod = b.createModule(.{
+        .root_source_file = b.path("exchanges/kraken/common/symbol_translator.zig"),
+    });
+
+    // Spot executor module
+    const spot_executor_mod = b.createModule(.{
+        .root_source_file = b.path("exchanges/kraken/spot/executor.zig"),
+    });
+    spot_executor_mod.addImport("oms", oms_mod);
+
+    // Futures executor module
+    const futures_executor_mod = b.createModule(.{
+        .root_source_file = b.path("exchanges/kraken/futures/executor.zig"),
+    });
+    futures_executor_mod.addImport("oms", oms_mod);
+
+    // Symbol translator tests
+    const kraken_symbol_translator_tests = b.addTest(.{
+        .name = "kraken_symbol_translator_test",
+        .root_source_file = b.path("exchanges/kraken/common/tests/symbol_translator_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    kraken_symbol_translator_tests.root_module.addImport("symbol_translator", symbol_translator_mod);
+
+    // Spot executor tests
+    const kraken_spot_executor_tests = b.addTest(.{
+        .name = "kraken_spot_executor_test",
+        .root_source_file = b.path("exchanges/kraken/spot/tests/executor_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    kraken_spot_executor_tests.root_module.addImport("spot_executor", spot_executor_mod);
+    kraken_spot_executor_tests.root_module.addImport("oms", oms_mod);
+    // Note: order_types is NOT added here; the test accesses it via oms_mod re-exports
+    // to avoid "file exists in multiple modules" when oms also imports order_types.
+
+    // Futures executor tests
+    const kraken_futures_executor_tests = b.addTest(.{
+        .name = "kraken_futures_executor_test",
+        .root_source_file = b.path("exchanges/kraken/futures/tests/executor_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    kraken_futures_executor_tests.root_module.addImport("futures_executor", futures_executor_mod);
+    kraken_futures_executor_tests.root_module.addImport("oms", oms_mod);
+
+    const run_kraken_symbol_translator_tests = b.addRunArtifact(kraken_symbol_translator_tests);
+    const run_kraken_spot_executor_tests = b.addRunArtifact(kraken_spot_executor_tests);
+    const run_kraken_futures_executor_tests = b.addRunArtifact(kraken_futures_executor_tests);
+
+    test_step.dependOn(&run_kraken_symbol_translator_tests.step);
+    test_step.dependOn(&run_kraken_spot_executor_tests.step);
+    test_step.dependOn(&run_kraken_futures_executor_tests.step);
+
+    test_kraken_step.dependOn(&run_kraken_symbol_translator_tests.step);
+    test_kraken_step.dependOn(&run_kraken_spot_executor_tests.step);
+    test_kraken_step.dependOn(&run_kraken_futures_executor_tests.step);
 }
