@@ -735,6 +735,92 @@ pub fn build(b: *std.Build) void {
     test_kraken_step.dependOn(&run_kraken_spot_rest_tests.step);
     test_kraken_step.dependOn(&run_kraken_futures_auth_tests.step);
 
+    // ---- Phase 12: Trading Strategies + Analytics ----
+
+    const orderbook_mod_p12 = b.createModule(.{
+        .root_source_file = b.path("sdk/domain/orderbook.zig"),
+    });
+
+    // Analytics modules
+    const tca_mod = b.createModule(.{
+        .root_source_file = b.path("trading/analytics/tca.zig"),
+    });
+    const attribution_mod = b.createModule(.{
+        .root_source_file = b.path("trading/analytics/attribution.zig"),
+    });
+    const vpin_mod = b.createModule(.{
+        .root_source_file = b.path("trading/analytics/vpin.zig"),
+    });
+
+    // Strategy modules
+    const basis_mod = b.createModule(.{
+        .root_source_file = b.path("trading/strategies/basis.zig"),
+    });
+    basis_mod.addImport("orderbook", orderbook_mod_p12);
+    const funding_arb_mod = b.createModule(.{
+        .root_source_file = b.path("trading/strategies/funding_arb.zig"),
+    });
+    funding_arb_mod.addImport("orderbook", orderbook_mod_p12);
+
+    // TCA tests
+    const tca_tests = b.addTest(.{
+        .name = "tca_test",
+        .root_source_file = b.path("trading/analytics/tests/tca_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    tca_tests.root_module.addImport("tca", tca_mod);
+
+    // Attribution tests
+    const attribution_tests = b.addTest(.{
+        .name = "attribution_test",
+        .root_source_file = b.path("trading/analytics/tests/attribution_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    attribution_tests.root_module.addImport("attribution", attribution_mod);
+
+    // VPIN tests
+    const vpin_tests = b.addTest(.{
+        .name = "vpin_test",
+        .root_source_file = b.path("trading/analytics/tests/vpin_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    vpin_tests.root_module.addImport("vpin", vpin_mod);
+
+    // Basis strategy tests
+    const basis_tests = b.addTest(.{
+        .name = "basis_test",
+        .root_source_file = b.path("trading/strategies/tests/basis_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    basis_tests.root_module.addImport("basis", basis_mod);
+    basis_tests.root_module.addImport("orderbook", orderbook_mod_p12);
+
+    // Funding arb tests
+    const funding_arb_tests = b.addTest(.{
+        .name = "funding_arb_test",
+        .root_source_file = b.path("trading/strategies/tests/funding_arb_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    funding_arb_tests.root_module.addImport("funding_arb", funding_arb_mod);
+    funding_arb_tests.root_module.addImport("orderbook", orderbook_mod_p12);
+
+    const run_tca_tests = b.addRunArtifact(tca_tests);
+    const run_attribution_tests = b.addRunArtifact(attribution_tests);
+    const run_vpin_tests = b.addRunArtifact(vpin_tests);
+    const run_basis_tests = b.addRunArtifact(basis_tests);
+    const run_funding_arb_tests = b.addRunArtifact(funding_arb_tests);
+
+    test_step.dependOn(&run_tca_tests.step);
+    test_step.dependOn(&run_attribution_tests.step);
+    test_step.dependOn(&run_vpin_tests.step);
+    test_step.dependOn(&run_basis_tests.step);
+    test_step.dependOn(&run_funding_arb_tests.step);
+
     // ---- Phase 4: WS clients + Market Data + Order Book ----
 
     // sdk/domain modules
