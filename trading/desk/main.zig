@@ -19,6 +19,7 @@ const Action = input_mod.Action;
 
 const orderbook_panel = @import("panels/orderbook_panel.zig");
 const positions_panel = @import("panels/positions_panel.zig");
+const chart_panel = @import("panels/chart_panel.zig");
 const orders_panel = @import("panels/orders_panel.zig");
 const status_panel = @import("panels/status_panel.zig");
 const order_entry_panel_mod = @import("panels/order_entry_panel.zig");
@@ -28,11 +29,10 @@ const theme_mod = @import("theme.zig");
 const MAX_POSITIONS = 16;
 const MAX_ORDERS = 64;
 
-// Panel indices
+// Panel indices (positions panel removed from tab cycle — accessed via 'p' overlay)
 const PANEL_ORDERBOOK = 0;
-const PANEL_POSITIONS = 1;
-const PANEL_ORDER_ENTRY = 2;
-const PANEL_RECENT_ORDERS = 3;
+const PANEL_ORDER_ENTRY = 1;
+const PANEL_RECENT_ORDERS = 2;
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -78,6 +78,11 @@ pub fn main() !void {
     var candle_counts: [2]usize = .{ 0, 0 };
     var engine_stopped = false;
     var ticks_since_event: u32 = 0;
+    var show_positions_overlay: bool = false;
+    var bbo_history: [2][128]i64 = undefined;
+    var bbo_history_count: [2]usize = .{ 0, 0 };
+    var frame_count: u64 = 0;
+    var order_arrival_frame: [MAX_ORDERS]u64 = std.mem.zeroes([MAX_ORDERS]u64);
 
     // Input and focus state
     var input_handler = InputHandler.init();
@@ -93,9 +98,6 @@ pub fn main() !void {
     const orders_scroll: i32 = 0;
     _ = orderbook_scroll;
     _ = orders_scroll;
-    // Candle history populated by engine events; rendering wired in Phase 4
-    _ = &candle_history;
-    _ = &candle_counts;
 
     while (!terminal_mod.signal_received) {
         // Check for resize
@@ -118,6 +120,13 @@ pub fn main() !void {
                             orderbook_snap[i].bid_count == 0)
                         {
                             orderbook_snap[i] = snap;
+                            // Update BBO midpoint history if both sides exist
+                            if (snap.bid_count > 0 and snap.ask_count > 0) {
+                                const midpoint = @divTrunc(snap.bids[0].price + snap.asks[0].price, 2);
+                                const slot = bbo_history_count[i] % 128;
+                                bbo_history[i][slot] = midpoint;
+                                bbo_history_count[i] += 1;
+                            }
                             break;
                         }
                     }
@@ -141,6 +150,7 @@ pub fn main() !void {
                     for (0..orders_count) |i| {
                         if (orders_buf[i].id == ou.id) {
                             orders_buf[i] = ou;
+                            order_arrival_frame[i] = frame_count;
                             found = true;
                             break;
                         }
@@ -148,10 +158,15 @@ pub fn main() !void {
                     if (!found) {
                         if (orders_count < MAX_ORDERS) {
                             orders_buf[orders_count] = ou;
+                            order_arrival_frame[orders_count] = frame_count;
                             orders_count += 1;
                         } else {
-                            for (0..MAX_ORDERS - 1) |i| orders_buf[i] = orders_buf[i + 1];
+                            for (0..MAX_ORDERS - 1) |i| {
+                                orders_buf[i] = orders_buf[i + 1];
+                                order_arrival_frame[i] = order_arrival_frame[i + 1];
+                            }
                             orders_buf[MAX_ORDERS - 1] = ou;
+                            order_arrival_frame[MAX_ORDERS - 1] = frame_count;
                         }
                     }
                 },
@@ -196,22 +211,22 @@ pub fn main() !void {
         if (active_panel == PANEL_ORDERBOOK) {
             renderer.writeRawPub("\x1b[1m");
         }
-        orderbook_panel.draw(&renderer, panels.orderbook, &orderbook_snap[active_instrument], theme);
+        const bbo_len = @min(bbo_history_count[active_instrument], 128);
+        orderbook_panel.draw(&renderer, panels.orderbook, &orderbook_snap[active_instrument], bbo_history[active_instrument][0..bbo_len], theme);
         if (active_panel == PANEL_ORDERBOOK) {
             renderer.writeRawPub("\x1b[0m");
         }
 
-        // Positions panel
-        if (active_panel == PANEL_POSITIONS) renderer.writeRawPub("\x1b[1m");
-        positions_panel.draw(&renderer, panels.positions, positions_buf[0..positions_count], theme);
-        if (active_panel == PANEL_POSITIONS) renderer.writeRawPub("\x1b[0m");
+        // Chart panel (top-right, replaces positions panel in tab cycle)
+        const candle_len = @min(candle_counts[active_instrument], 64);
+        chart_panel.draw(&renderer, panels.chart, candle_history[active_instrument][0..candle_len], theme);
 
         // Order entry panel
         order_entry.draw(&renderer, panels.order_entry, active_panel == PANEL_ORDER_ENTRY, theme);
 
         // Recent orders panel
         if (active_panel == PANEL_RECENT_ORDERS) renderer.writeRawPub("\x1b[1m");
-        orders_panel.draw(&renderer, panels.recent_orders, orders_buf[0..orders_count], theme);
+        orders_panel.draw(&renderer, panels.recent_orders, orders_buf[0..orders_count], frame_count, theme);
         if (active_panel == PANEL_RECENT_ORDERS) renderer.writeRawPub("\x1b[0m");
 
         // Status bar
@@ -223,7 +238,13 @@ pub fn main() !void {
         } else if (engine_stopped) {
             renderer.drawText(panels.status_bar.x, panels.status_bar.y, "Engine stopped | q=quit | Tab=switch panel");
         } else {
-            status_panel.draw(&renderer, panels.status_bar, &latest_status, theme);
+            const status_age: u32 = if (status_msg_frames < 45) 45 - status_msg_frames else 0;
+            status_panel.draw(&renderer, panels.status_bar, &latest_status, status_age, theme);
+        }
+
+        // Positions overlay (drawn on top of all panels when toggled with 'p')
+        if (show_positions_overlay) {
+            positions_panel.draw(&renderer, panels.positions_overlay, positions_buf[0..positions_count], theme);
         }
 
         try renderer.endFrame();
@@ -231,7 +252,7 @@ pub fn main() !void {
         // Process frame boundary escape reset
         if (input_handler.frameReset()) |act| {
             _ = processAction(&input_handler, act, &active_panel, &active_instrument, &order_entry,
-                &from_tui, &status_msg, &status_msg_len, &status_msg_frames);
+                &from_tui, &status_msg, &status_msg_len, &status_msg_frames, &show_positions_overlay);
         }
 
         // Process input bytes
@@ -239,7 +260,7 @@ pub fn main() !void {
             const text_mode = (active_panel == PANEL_ORDER_ENTRY);
             if (input_handler.feed(byte, text_mode)) |act| {
                 const should_quit = processAction(&input_handler, act, &active_panel, &active_instrument,
-                    &order_entry, &from_tui, &status_msg, &status_msg_len, &status_msg_frames);
+                    &order_entry, &from_tui, &status_msg, &status_msg_len, &status_msg_frames, &show_positions_overlay);
                 if (should_quit) {
                     _ = from_tui.push(UserCommand{ .quit = {} });
                     goto_done = true;
@@ -250,6 +271,7 @@ pub fn main() !void {
 
         if (goto_done) break;
 
+        frame_count += 1;
         std.Thread.sleep(66_000_000); // ~15 FPS
     }
 
@@ -270,6 +292,7 @@ fn processAction(
     status_msg: *[64]u8,
     status_msg_len: *usize,
     status_msg_frames: *u32,
+    show_positions_overlay: *bool,
 ) bool {
     _ = _handler;
     switch (action) {
@@ -286,14 +309,17 @@ fn processAction(
             }
         },
         .tab => {
-            active_panel.* = (active_panel.* + 1) % 4;
+            active_panel.* = (active_panel.* + 1) % 3;
         },
         .shift_tab => {
             if (active_panel.* == 0) {
-                active_panel.* = 3;
+                active_panel.* = 2;
             } else {
                 active_panel.* -= 1;
             }
+        },
+        .toggle_positions => {
+            show_positions_overlay.* = !show_positions_overlay.*;
         },
         .char => |c| {
             if (active_panel.* == PANEL_ORDER_ENTRY) {
