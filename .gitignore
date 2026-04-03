@@ -24,6 +24,9 @@ desktop.ini
 *.lnk
 *.tmp
 
+# Worktrees
+.worktrees/
+
 # Secrets
 .env
 *.pem
