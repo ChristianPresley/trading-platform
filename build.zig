@@ -312,6 +312,62 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("sdk/protocol/pitch.zig"),
     });
 
+    // FIX modules
+    const fix_codec_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/protocol/fix/codec.zig"),
+    });
+    const fix_seq_store_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/protocol/fix/seq_store.zig"),
+    });
+    const fix_session_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/protocol/fix/session.zig"),
+    });
+    fix_session_mod.addImport("codec", fix_codec_mod);
+    fix_session_mod.addImport("seq_store", fix_seq_store_mod);
+
+    // FIX codec tests
+    const fix_codec_tests = b.addTest(.{
+        .name = "fix_codec_test",
+        .root_source_file = b.path("sdk/protocol/fix/tests/codec_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    fix_codec_tests.root_module.addImport("fix_codec", fix_codec_mod);
+
+    // FIX session tests
+    const fix_session_tests = b.addTest(.{
+        .name = "fix_session_test",
+        .root_source_file = b.path("sdk/protocol/fix/tests/session_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    fix_session_tests.root_module.addImport("fix_codec", fix_codec_mod);
+    fix_session_tests.root_module.addImport("fix_session", fix_session_mod);
+    fix_session_tests.root_module.addImport("fix_seq_store", fix_seq_store_mod);
+
+    // Kraken FIX client module
+    const kraken_fix_client_mod = b.createModule(.{
+        .root_source_file = b.path("exchanges/kraken/spot/fix_client.zig"),
+    });
+    kraken_fix_client_mod.addImport("fix_codec", fix_codec_mod);
+    kraken_fix_client_mod.addImport("fix_session", fix_session_mod);
+    kraken_fix_client_mod.addImport("hmac", hmac_mod);
+    kraken_fix_client_mod.addImport("base64", base64_mod);
+
+    // Kraken FIX client tests
+    const kraken_fix_client_tests = b.addTest(.{
+        .name = "kraken_fix_client_test",
+        .root_source_file = b.path("exchanges/kraken/spot/tests/fix_client_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    kraken_fix_client_tests.root_module.addImport("fix_client", kraken_fix_client_mod);
+    kraken_fix_client_tests.root_module.addImport("fix_codec", fix_codec_mod);
+
+    const run_fix_codec_tests = b.addRunArtifact(fix_codec_tests);
+    const run_fix_session_tests = b.addRunArtifact(fix_session_tests);
+    const run_kraken_fix_client_tests = b.addRunArtifact(kraken_fix_client_tests);
+
     const run_proto_json_tests = b.addRunArtifact(proto_json_tests);
     const run_proto_tls_tests = b.addRunArtifact(proto_tls_tests);
     const run_proto_http_tests = b.addRunArtifact(proto_http_tests);
@@ -329,6 +385,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_fast_tests.step);
     test_step.dependOn(&run_ouch_tests.step);
     test_step.dependOn(&run_pitch_tests.step);
+    test_step.dependOn(&run_fix_codec_tests.step);
+    test_step.dependOn(&run_fix_session_tests.step);
+    test_step.dependOn(&run_kraken_fix_client_tests.step);
 
     test_protocol_step.dependOn(&run_proto_json_tests.step);
     test_protocol_step.dependOn(&run_proto_tls_tests.step);
@@ -338,6 +397,8 @@ pub fn build(b: *std.Build) void {
     test_protocol_step.dependOn(&run_fast_tests.step);
     test_protocol_step.dependOn(&run_ouch_tests.step);
     test_protocol_step.dependOn(&run_pitch_tests.step);
+    test_protocol_step.dependOn(&run_fix_codec_tests.step);
+    test_protocol_step.dependOn(&run_fix_session_tests.step);
 
     // ---- Phase 3: WebSocket + Kraken REST ----
     const test_ws_step = b.step("test-ws", "Run WebSocket tests");
@@ -394,7 +455,6 @@ pub fn build(b: *std.Build) void {
     const futures_rate_limiter_mod = b.createModule(.{
         .root_source_file = b.path("exchanges/kraken/futures/rate_limiter.zig"),
     });
-    // futures_rate_limiter_mod is available for test steps that import it
     _ = futures_rate_limiter_mod;
 
     // Kraken futures types module
@@ -431,7 +491,7 @@ pub fn build(b: *std.Build) void {
     });
     kraken_spot_rate_limiter_tests.root_module.addImport("spot_rate_limiter", spot_rate_limiter_mod);
 
-    // Kraken spot rest_client tests (JSON parsing only, no network)
+    // Kraken spot rest_client tests
     const kraken_spot_rest_tests = b.addTest(.{
         .name = "kraken_spot_rest_test",
         .root_source_file = b.path("exchanges/kraken/spot/tests/rest_client_test.zig"),
