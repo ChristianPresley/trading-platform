@@ -129,4 +129,81 @@ pub fn build(b: *std.Build) void {
     test_core_step.dependOn(&run_time_tests.step);
     test_core_step.dependOn(&run_containers_tests.step);
     test_core_step.dependOn(&run_crypto_tests.step);
+
+    // ---- Protocol test steps ----
+    const test_protocol_step = b.step("test-protocol", "Run sdk/protocol tests");
+
+    // ITCH tests
+    const proto_itch_tests = b.addTest(.{
+        .name = "itch_test",
+        .root_source_file = b.path("sdk/protocol/tests/itch_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    proto_itch_tests.root_module.addAnonymousImport("itch", .{
+        .root_source_file = b.path("sdk/protocol/itch.zig"),
+    });
+
+    // SBE tests
+    const proto_sbe_tests = b.addTest(.{
+        .name = "sbe_test",
+        .root_source_file = b.path("sdk/protocol/tests/sbe_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    proto_sbe_tests.root_module.addAnonymousImport("sbe", .{
+        .root_source_file = b.path("sdk/protocol/sbe.zig"),
+    });
+
+    // FAST tests
+    const proto_fast_tests = b.addTest(.{
+        .name = "fast_test",
+        .root_source_file = b.path("sdk/protocol/tests/fast_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    proto_fast_tests.root_module.addAnonymousImport("fast", .{
+        .root_source_file = b.path("sdk/protocol/fast.zig"),
+    });
+
+    // OUCH tests
+    const proto_ouch_tests = b.addTest(.{
+        .name = "ouch_test",
+        .root_source_file = b.path("sdk/protocol/tests/ouch_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    proto_ouch_tests.root_module.addAnonymousImport("ouch", .{
+        .root_source_file = b.path("sdk/protocol/ouch.zig"),
+    });
+
+    // PITCH tests
+    const proto_pitch_tests = b.addTest(.{
+        .name = "pitch_test",
+        .root_source_file = b.path("sdk/protocol/tests/pitch_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    proto_pitch_tests.root_module.addAnonymousImport("pitch", .{
+        .root_source_file = b.path("sdk/protocol/pitch.zig"),
+    });
+
+    const run_itch_tests = b.addRunArtifact(proto_itch_tests);
+    const run_sbe_tests = b.addRunArtifact(proto_sbe_tests);
+    const run_fast_tests = b.addRunArtifact(proto_fast_tests);
+    const run_ouch_tests = b.addRunArtifact(proto_ouch_tests);
+    const run_pitch_tests = b.addRunArtifact(proto_pitch_tests);
+
+    test_protocol_step.dependOn(&run_itch_tests.step);
+    test_protocol_step.dependOn(&run_sbe_tests.step);
+    test_protocol_step.dependOn(&run_fast_tests.step);
+    test_protocol_step.dependOn(&run_ouch_tests.step);
+    test_protocol_step.dependOn(&run_pitch_tests.step);
+
+    // Add protocol tests to global test step
+    test_step.dependOn(&run_itch_tests.step);
+    test_step.dependOn(&run_sbe_tests.step);
+    test_step.dependOn(&run_fast_tests.step);
+    test_step.dependOn(&run_ouch_tests.step);
+    test_step.dependOn(&run_pitch_tests.step);
 }
