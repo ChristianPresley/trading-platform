@@ -140,6 +140,25 @@ pub fn build(b: *std.Build) void {
     });
     pre_trade_mod.addImport("oms", oms_mod);
 
+    // Phase 8: positions, risk/math, risk/var, risk/greeks, risk/stress
+    const positions_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/domain/positions.zig"),
+    });
+    const risk_math_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/domain/risk/math.zig"),
+    });
+    const risk_var_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/domain/risk/var.zig"),
+    });
+    risk_var_mod.addImport("math", risk_math_mod);
+    const risk_greeks_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/domain/risk/greeks.zig"),
+    });
+    const risk_stress_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/domain/risk/stress.zig"),
+    });
+    _ = risk_stress_mod;
+
     // Domain tests: OMS
     const domain_oms_tests = b.addTest(.{
         .name = "oms_test",
@@ -168,6 +187,33 @@ pub fn build(b: *std.Build) void {
     domain_risk_tests.root_module.addImport("pre_trade", pre_trade_mod);
     domain_risk_tests.root_module.addImport("oms", oms_mod);
 
+    // Phase 8: positions tests
+    const domain_positions_tests = b.addTest(.{
+        .name = "positions_test",
+        .root_source_file = b.path("sdk/domain/tests/positions_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    domain_positions_tests.root_module.addImport("positions", positions_mod);
+
+    // Phase 8: VaR tests
+    const domain_var_tests = b.addTest(.{
+        .name = "var_test",
+        .root_source_file = b.path("sdk/domain/tests/var_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    domain_var_tests.root_module.addImport("var", risk_var_mod);
+
+    // Phase 8: greeks tests
+    const domain_greeks_tests = b.addTest(.{
+        .name = "greeks_test",
+        .root_source_file = b.path("sdk/domain/tests/greeks_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    domain_greeks_tests.root_module.addImport("greeks", risk_greeks_mod);
+
     const run_memory_tests = b.addRunArtifact(core_memory_tests);
     const run_time_tests = b.addRunArtifact(core_time_tests);
     const run_containers_tests = b.addRunArtifact(core_containers_tests);
@@ -176,6 +222,9 @@ pub fn build(b: *std.Build) void {
     const run_oms_tests = b.addRunArtifact(domain_oms_tests);
     const run_order_types_tests = b.addRunArtifact(domain_order_types_tests);
     const run_risk_tests = b.addRunArtifact(domain_risk_tests);
+    const run_positions_tests = b.addRunArtifact(domain_positions_tests);
+    const run_var_tests = b.addRunArtifact(domain_var_tests);
+    const run_greeks_tests = b.addRunArtifact(domain_greeks_tests);
 
     test_step.dependOn(&run_memory_tests.step);
     test_step.dependOn(&run_time_tests.step);
@@ -185,6 +234,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_oms_tests.step);
     test_step.dependOn(&run_order_types_tests.step);
     test_step.dependOn(&run_risk_tests.step);
+    test_step.dependOn(&run_positions_tests.step);
+    test_step.dependOn(&run_var_tests.step);
+    test_step.dependOn(&run_greeks_tests.step);
 
     test_core_step.dependOn(&run_memory_tests.step);
     test_core_step.dependOn(&run_time_tests.step);
