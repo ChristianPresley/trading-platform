@@ -214,6 +214,73 @@ pub fn build(b: *std.Build) void {
     });
     domain_greeks_tests.root_module.addImport("greeks", risk_greeks_mod);
 
+    // Phase 11: post-trade modules
+    const reconciliation_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/domain/post_trade/reconciliation.zig"),
+    });
+    const eod_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/domain/post_trade/eod.zig"),
+    });
+    eod_mod.addImport("reconciliation", reconciliation_mod);
+    const allocation_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/domain/post_trade/allocation.zig"),
+    });
+    allocation_mod.addImport("reconciliation", reconciliation_mod);
+
+    // Phase 11: tick store + parquet modules
+    const tick_store_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/domain/tick_store.zig"),
+    });
+    const parquet_writer_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/domain/parquet_writer.zig"),
+    });
+
+    // Phase 11: reconciliation tests
+    const domain_reconciliation_tests = b.addTest(.{
+        .name = "reconciliation_test",
+        .root_source_file = b.path("sdk/domain/post_trade/tests/reconciliation_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    domain_reconciliation_tests.root_module.addImport("reconciliation", reconciliation_mod);
+
+    // Phase 11: EOD tests
+    const domain_eod_tests = b.addTest(.{
+        .name = "eod_test",
+        .root_source_file = b.path("sdk/domain/post_trade/tests/eod_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    domain_eod_tests.root_module.addImport("eod", eod_mod);
+    domain_eod_tests.root_module.addImport("reconciliation", reconciliation_mod);
+
+    // Phase 11: allocation tests
+    const domain_allocation_tests = b.addTest(.{
+        .name = "allocation_test",
+        .root_source_file = b.path("sdk/domain/post_trade/tests/allocation_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    domain_allocation_tests.root_module.addImport("allocation", allocation_mod);
+
+    // Phase 11: tick store tests
+    const domain_tick_store_tests = b.addTest(.{
+        .name = "tick_store_test",
+        .root_source_file = b.path("sdk/domain/tests/tick_store_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    domain_tick_store_tests.root_module.addImport("tick_store", tick_store_mod);
+
+    // Phase 11: parquet tests
+    const domain_parquet_tests = b.addTest(.{
+        .name = "parquet_test",
+        .root_source_file = b.path("sdk/domain/tests/parquet_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    domain_parquet_tests.root_module.addImport("parquet_writer", parquet_writer_mod);
+
     const run_memory_tests = b.addRunArtifact(core_memory_tests);
     const run_time_tests = b.addRunArtifact(core_time_tests);
     const run_containers_tests = b.addRunArtifact(core_containers_tests);
@@ -226,6 +293,13 @@ pub fn build(b: *std.Build) void {
     const run_var_tests = b.addRunArtifact(domain_var_tests);
     const run_greeks_tests = b.addRunArtifact(domain_greeks_tests);
 
+    // Phase 11 run artifacts
+    const run_reconciliation_tests = b.addRunArtifact(domain_reconciliation_tests);
+    const run_eod_tests = b.addRunArtifact(domain_eod_tests);
+    const run_allocation_tests = b.addRunArtifact(domain_allocation_tests);
+    const run_tick_store_tests = b.addRunArtifact(domain_tick_store_tests);
+    const run_parquet_tests = b.addRunArtifact(domain_parquet_tests);
+
     test_step.dependOn(&run_memory_tests.step);
     test_step.dependOn(&run_time_tests.step);
     test_step.dependOn(&run_containers_tests.step);
@@ -237,6 +311,11 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_positions_tests.step);
     test_step.dependOn(&run_var_tests.step);
     test_step.dependOn(&run_greeks_tests.step);
+    test_step.dependOn(&run_reconciliation_tests.step);
+    test_step.dependOn(&run_eod_tests.step);
+    test_step.dependOn(&run_allocation_tests.step);
+    test_step.dependOn(&run_tick_store_tests.step);
+    test_step.dependOn(&run_parquet_tests.step);
 
     test_core_step.dependOn(&run_memory_tests.step);
     test_core_step.dependOn(&run_time_tests.step);
