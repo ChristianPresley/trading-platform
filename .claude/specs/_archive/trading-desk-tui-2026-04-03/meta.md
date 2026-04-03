@@ -22,4 +22,4 @@ tracking-issue: 26
 - Phase 5 (plan): 01
 - Phase 6 (worktree): 01
 - Phase 7 (implement): 01
-- Phase 8 (pull-request): 01
+- Phase 8 (pull-request): 01 — pushed directly to main

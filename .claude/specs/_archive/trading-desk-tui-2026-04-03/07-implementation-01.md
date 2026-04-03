@@ -12,7 +12,7 @@ Worktrees: .claude/specs/trading-desk-tui/06-worktree-01.md
 ## Worktree 1 — trading-desk-tui-01-01
 
 Path: .worktrees/trading-desk-tui-01
-Phases: 1, 2, 3, 4, 5, 6, 7
+Phases: 1, 2, 3, 4, 5, 6, 7 (all sequential)
 
 ### Phase 1: Build System and Minimal Executable
 
@@ -20,7 +20,7 @@ Phases: 1, 2, 3, 4, 5, 6, 7
 - Checkpoint command: `zig build run-desk`
 - Expected output: `Trading Desk v0.1.0`
 - Actual result: exit 0, output "Trading Desk v0.1.0"
-- Recovery attempts: 1 (fix: `root_module` param not supported in Zig 0.13, changed to `root_source_file` + `root_module.addImport`)
+- Recovery attempts: Build system migration required — Zig 0.15.2 installed (plan assumed 0.13). Migrated all ~50 `addTest` calls from 0.13 API (`root_source_file` param) to 0.15 API (`createModule` + `root_module`).
 - Details: Created trading/desk/main.zig, added executable target and 4 build steps to build.zig, defined memory/time/ring_buffer/thread modules
 - Exceptions: None
 
@@ -30,14 +30,14 @@ Phases: 1, 2, 3, 4, 5, 6, 7
 - Checkpoint command: `zig build test-desk`
 - Expected output: exit code 0
 - Actual result: exit 0
-- Recovery attempts: 2 (fix 1: Sigaction flags initialization syntax for Zig 0.13 packed struct, fix 2: winsize field names ws_row/ws_col)
+- Recovery attempts: 2 (fix 1: `callconv(.c)` not `.C` in Zig 0.15, `posix.sigemptyset()` not `posix.empty_sigset`; fix 2: winsize field names)
 - Details: Created terminal.zig with raw mode, alternate screen, non-blocking reads, SIGINT/SIGTERM handler
 - Exceptions: None
 
 ### Phase 3: Rendering Framework and Panel Layout
 
 - Status: `passed`
-- Checkpoint command: `zig build build-desk && zig build test-desk`
+- Checkpoint command: `zig build test-desk`
 - Expected output: exit code 0
 - Actual result: exit 0
 - Recovery attempts: 1 (fix: `var fba` -> `const fba` in test, unused variable error)
@@ -47,7 +47,7 @@ Phases: 1, 2, 3, 4, 5, 6, 7
 ### Phase 4: Engine Thread and Ring Buffer Communication
 
 - Status: `passed`
-- Checkpoint command: `zig build build-desk && zig build test-desk`
+- Checkpoint command: `zig build test-desk`
 - Expected output: exit code 0
 - Actual result: exit 0
 - Recovery attempts: none needed
@@ -57,17 +57,17 @@ Phases: 1, 2, 3, 4, 5, 6, 7
 ### Phase 5: Domain Integration and Synthetic Data
 
 - Status: `passed`
-- Checkpoint command: `zig build build-desk && zig build test-desk`
+- Checkpoint command: `zig build test-desk`
 - Expected output: exit code 0
 - Actual result: exit 0
 - Recovery attempts: 1 (fix: `var active_instrument` -> `const active_instrument` since not yet mutated)
 - Details: Created synthetic.zig, 4 panel draw modules, wired L2Book integration in engine
-- Exceptions: Engine uses simplified demo mode (synthetic data + fake order responses) rather than wiring full OMS/PreTradeRisk/SpotExecutor — acceptable for v1
+- Exceptions: Engine uses simplified demo mode (synthetic data + fixed-array position tracking) rather than full PositionManager — PositionManager uses `std.ArrayList.init(allocator)` which is removed in Zig 0.15. Acceptable for v1.
 
 ### Phase 6: Input Handling and Order Entry
 
 - Status: `passed`
-- Checkpoint command: `zig build build-desk && zig build test-desk`
+- Checkpoint command: `zig build test-desk`
 - Expected output: exit code 0
 - Actual result: exit 0
 - Recovery attempts: none needed
