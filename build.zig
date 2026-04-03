@@ -281,6 +281,68 @@ pub fn build(b: *std.Build) void {
     });
     domain_parquet_tests.root_module.addImport("parquet_writer", parquet_writer_mod);
 
+    // Phase 10: execution algorithm modules
+    const twap_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/domain/algos/twap.zig"),
+    });
+    const vwap_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/domain/algos/vwap.zig"),
+    });
+    const pov_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/domain/algos/pov.zig"),
+    });
+    const iceberg_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/domain/algos/iceberg.zig"),
+    });
+    const sor_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/domain/sor.zig"),
+    });
+
+    // Phase 10: TWAP tests
+    const domain_twap_tests = b.addTest(.{
+        .name = "twap_test",
+        .root_source_file = b.path("sdk/domain/algos/tests/twap_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    domain_twap_tests.root_module.addImport("twap", twap_mod);
+
+    // Phase 10: VWAP tests
+    const domain_vwap_tests = b.addTest(.{
+        .name = "vwap_test",
+        .root_source_file = b.path("sdk/domain/algos/tests/vwap_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    domain_vwap_tests.root_module.addImport("vwap", vwap_mod);
+
+    // Phase 10: POV tests
+    const domain_pov_tests = b.addTest(.{
+        .name = "pov_test",
+        .root_source_file = b.path("sdk/domain/algos/tests/pov_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    domain_pov_tests.root_module.addImport("pov", pov_mod);
+
+    // Phase 10: Iceberg tests
+    const domain_iceberg_tests = b.addTest(.{
+        .name = "iceberg_test",
+        .root_source_file = b.path("sdk/domain/algos/tests/iceberg_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    domain_iceberg_tests.root_module.addImport("iceberg", iceberg_mod);
+
+    // Phase 10: SOR tests
+    const domain_sor_tests = b.addTest(.{
+        .name = "sor_test",
+        .root_source_file = b.path("sdk/domain/tests/sor_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    domain_sor_tests.root_module.addImport("sor", sor_mod);
+
     const run_memory_tests = b.addRunArtifact(core_memory_tests);
     const run_time_tests = b.addRunArtifact(core_time_tests);
     const run_containers_tests = b.addRunArtifact(core_containers_tests);
@@ -300,6 +362,13 @@ pub fn build(b: *std.Build) void {
     const run_tick_store_tests = b.addRunArtifact(domain_tick_store_tests);
     const run_parquet_tests = b.addRunArtifact(domain_parquet_tests);
 
+    // Phase 10 run artifacts
+    const run_twap_tests = b.addRunArtifact(domain_twap_tests);
+    const run_vwap_tests = b.addRunArtifact(domain_vwap_tests);
+    const run_pov_tests = b.addRunArtifact(domain_pov_tests);
+    const run_iceberg_tests = b.addRunArtifact(domain_iceberg_tests);
+    const run_sor_tests = b.addRunArtifact(domain_sor_tests);
+
     test_step.dependOn(&run_memory_tests.step);
     test_step.dependOn(&run_time_tests.step);
     test_step.dependOn(&run_containers_tests.step);
@@ -316,6 +385,11 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_allocation_tests.step);
     test_step.dependOn(&run_tick_store_tests.step);
     test_step.dependOn(&run_parquet_tests.step);
+    test_step.dependOn(&run_twap_tests.step);
+    test_step.dependOn(&run_vwap_tests.step);
+    test_step.dependOn(&run_pov_tests.step);
+    test_step.dependOn(&run_iceberg_tests.step);
+    test_step.dependOn(&run_sor_tests.step);
 
     test_core_step.dependOn(&run_memory_tests.step);
     test_core_step.dependOn(&run_time_tests.step);
