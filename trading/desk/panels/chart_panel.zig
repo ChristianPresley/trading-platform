@@ -346,3 +346,33 @@ test "height_split_computation" {
     try @import("std").testing.expectEqual(@as(u16, 5), volume_h);
     try @import("std").testing.expectEqual(@as(u16, 14), chart_h);
 }
+
+test "visibleCandles_calculation" {
+    // width=38, candle_width=3 → 12
+    try @import("std").testing.expectEqual(@as(usize, 12), visibleCandles(38, 3));
+    // width=38, candle_width=1 → 38
+    try @import("std").testing.expectEqual(@as(usize, 38), visibleCandles(38, 1));
+    // width=38, candle_width=5 → 7
+    try @import("std").testing.expectEqual(@as(usize, 7), visibleCandles(38, 5));
+}
+
+test "clampViewport_bounds" {
+    // offset beyond total clamps to total - visible
+    try @import("std").testing.expectEqual(@as(usize, 10), clampViewport(999, 10, 20));
+    // offset within range passes through
+    try @import("std").testing.expectEqual(@as(usize, 5), clampViewport(5, 10, 20));
+    // total <= visible returns 0
+    try @import("std").testing.expectEqual(@as(usize, 0), clampViewport(3, 10, 5));
+}
+
+test "clampViewport_auto_follow" {
+    // Auto-follow: viewport_offset=0, total > visible → effective = total - visible
+    const total: usize = 100;
+    const max_vis: usize = 20;
+    const viewport_offset: usize = 0;
+    const effective = if (viewport_offset == 0)
+        (if (total > max_vis) total - max_vis else 0)
+    else
+        clampViewport(total -| viewport_offset -| max_vis, max_vis, total);
+    try @import("std").testing.expectEqual(@as(usize, 80), effective);
+}

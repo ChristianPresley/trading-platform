@@ -15,6 +15,8 @@ pub const Action = union(enum) {
     quit: void,
     delete_line: void,
     toggle_positions: void,
+    zoom_in: void,
+    zoom_out: void,
 };
 
 const State = enum {
@@ -61,6 +63,14 @@ pub const InputHandler = struct {
                         // 'p' toggles positions overlay unless in text_mode
                         if (c == 'p' and !text_mode) {
                             return Action{ .toggle_positions = {} };
+                        }
+                        // '+' or '=' zooms in (= because + requires shift on US keyboards)
+                        if ((c == '+' or c == '=') and !text_mode) {
+                            return Action{ .zoom_in = {} };
+                        }
+                        // '-' zooms out
+                        if (c == '-' and !text_mode) {
+                            return Action{ .zoom_out = {} };
                         }
                         return Action{ .char = c };
                     },

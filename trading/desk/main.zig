@@ -83,6 +83,8 @@ pub fn main() !void {
     var bbo_history_count: [2]usize = .{ 0, 0 };
     var frame_count: u64 = 0;
     var order_arrival_frame: [MAX_ORDERS]u64 = std.mem.zeroes([MAX_ORDERS]u64);
+    var viewport_offset: [2]usize = .{ 0, 0 }; // per-instrument scroll offset
+    var candle_width: u8 = 3; // shared zoom level
 
     // Input and focus state
     var input_handler = InputHandler.init();
@@ -219,7 +221,7 @@ pub fn main() !void {
 
         // Chart panel (top-right, replaces positions panel in tab cycle)
         const candle_len = @min(candle_counts[active_instrument], 512);
-        chart_panel.draw(&renderer, panels.chart, candle_history[active_instrument][0..candle_len], theme, 0, 3);
+        chart_panel.draw(&renderer, panels.chart, candle_history[active_instrument][0..candle_len], theme, viewport_offset[active_instrument], candle_width);
 
         // Order entry panel
         order_entry.draw(&renderer, panels.order_entry, active_panel == PANEL_ORDER_ENTRY, theme);
@@ -252,7 +254,8 @@ pub fn main() !void {
         // Process frame boundary escape reset
         if (input_handler.frameReset()) |act| {
             _ = processAction(&input_handler, act, &active_panel, &active_instrument, &order_entry,
-                &from_tui, &status_msg, &status_msg_len, &status_msg_frames, &show_positions_overlay);
+                &from_tui, &status_msg, &status_msg_len, &status_msg_frames, &show_positions_overlay,
+                &viewport_offset, &candle_width, &candle_counts);
         }
 
         // Process input bytes
@@ -260,7 +263,8 @@ pub fn main() !void {
             const text_mode = (active_panel == PANEL_ORDER_ENTRY);
             if (input_handler.feed(byte, text_mode)) |act| {
                 const should_quit = processAction(&input_handler, act, &active_panel, &active_instrument,
-                    &order_entry, &from_tui, &status_msg, &status_msg_len, &status_msg_frames, &show_positions_overlay);
+                    &order_entry, &from_tui, &status_msg, &status_msg_len, &status_msg_frames, &show_positions_overlay,
+                    &viewport_offset, &candle_width, &candle_counts);
                 if (should_quit) {
                     _ = from_tui.push(UserCommand{ .quit = {} });
                     goto_done = true;
@@ -293,6 +297,9 @@ fn processAction(
     status_msg_len: *usize,
     status_msg_frames: *u32,
     show_positions_overlay: *bool,
+    viewport_offset: *[2]usize,
+    candle_width: *u8,
+    candle_counts: *[2]usize,
 ) bool {
     _ = _handler;
     switch (action) {
@@ -333,6 +340,52 @@ fn processAction(
             if (active_panel.* == PANEL_ORDER_ENTRY) {
                 _ = order_entry.handleAction(action);
             }
+        },
+        .arrow_left => {
+            if (active_panel.* != PANEL_ORDER_ENTRY) {
+                // Scroll left (further back in history)
+                const idx = active_instrument.*;
+                const total = candle_counts.*[idx];
+                if (viewport_offset.*[idx] == 0) {
+                    // Start scroll: offset > 0 means scrolled from right edge
+                    // 0 = auto-follow; increment to 1 to start scrolling
+                    if (total > 1) viewport_offset.*[idx] = 1;
+                } else {
+                    viewport_offset.*[idx] += 1;
+                    // Clamp to max meaningful offset (total candles - 1)
+                    if (viewport_offset.*[idx] >= total) {
+                        viewport_offset.*[idx] = if (total > 0) total - 1 else 0;
+                    }
+                }
+            }
+        },
+        .arrow_right => {
+            if (active_panel.* != PANEL_ORDER_ENTRY) {
+                // Scroll right (toward newest candles)
+                const idx = active_instrument.*;
+                if (viewport_offset.*[idx] > 1) {
+                    viewport_offset.*[idx] -= 1;
+                } else {
+                    // Back to auto-follow
+                    viewport_offset.*[idx] = 0;
+                }
+            }
+        },
+        .zoom_in => {
+            // Cycle candle_width: 1 → 3 → 5 → 1
+            candle_width.* = switch (candle_width.*) {
+                1 => 3,
+                3 => 5,
+                else => 1,
+            };
+        },
+        .zoom_out => {
+            // Cycle candle_width: 5 → 3 → 1 → 5
+            candle_width.* = switch (candle_width.*) {
+                5 => 3,
+                3 => 1,
+                else => 5,
+            };
         },
         .enter => {
             if (active_panel.* == PANEL_ORDER_ENTRY) {
