@@ -1,4 +1,4 @@
-// Engine thread: integrates synthetic market data, OMS, and basic positions.
+// Engine thread: integrates synthetic market data, OMS, risk, matching, and positions.
 // Uses SpscRingBuffer for TUI communication.
 
 const std = @import("std");
@@ -16,8 +16,22 @@ const L2Book = @import("orderbook").L2Book;
 const oms_mod = @import("oms");
 const OrderManager = oms_mod.OrderManager;
 const Order = oms_mod.Order;
+const ExecType = oms_mod.ExecType;
+const FillInfo = oms_mod.FillInfo;
 const bar_agg = @import("bar_aggregator");
 const BarAggregator = bar_agg.BarAggregator;
+
+const pre_trade_mod = @import("pre_trade");
+const PreTradeRisk = pre_trade_mod.PreTradeRisk;
+const RiskConfig = pre_trade_mod.RiskConfig;
+
+const positions_mod = @import("positions");
+const PositionManager = positions_mod.PositionManager;
+const PositionConfig = positions_mod.PositionConfig;
+const Fill = positions_mod.Fill;
+
+const matching_mod = @import("matching_engine.zig");
+const MatchingEngine = matching_mod.MatchingEngine;
 
 const INSTRUMENTS = [_][]const u8{
     "BTC-USD",
@@ -30,31 +44,22 @@ const INSTRUMENTS = [_][]const u8{
     "BTC-USD-20231229",
 };
 
-/// Stub risk validate function (always passes — demo mode).
-fn riskValidateStub(risk: *anyopaque, order: *const Order) bool {
-    _ = risk;
-    _ = order;
-    return true;
-}
-
-/// Stub event store append function.
-fn storeAppendStub(store: *anyopaque, data: []const u8) anyerror!u64 {
+/// Noop event store append function (no persistence needed in demo).
+fn storeAppendNoop(store: *anyopaque, data: []const u8) anyerror!u64 {
     _ = store;
     _ = data;
     return 0;
 }
 
-/// Dummy objects for function pointer injection.
-var dummy_risk: u8 = 0;
-var dummy_store: u8 = 0;
+/// Risk validate wrapper: casts anyopaque to *PreTradeRisk and calls validate().
+fn riskValidateWrapper(risk_ptr: *anyopaque, order: *const Order) bool {
+    const risk: *PreTradeRisk = @ptrCast(@alignCast(risk_ptr));
+    const result = risk.validate(order);
+    return result == .passed;
+}
 
-/// Simple position tracking (fixed array, avoids ArrayList API issues).
-const SimplePosition = struct {
-    instrument: InstrumentId,
-    quantity: i64,
-    avg_cost: i64,
-    realized_pnl: i64,
-};
+/// Dummy store object for OMS.
+var dummy_store: u8 = 0;
 
 pub const Engine = struct {
     allocator: std.mem.Allocator,
@@ -70,9 +75,10 @@ pub const Engine = struct {
     // Candle aggregators (one per instrument)
     candle_aggs: [8]BarAggregator,
 
-    // Simple position tracking
-    positions: [16]SimplePosition,
-    position_count: usize,
+    // Real risk, matching, and position management
+    risk: *PreTradeRisk,
+    pos_manager: PositionManager,
+    matching: MatchingEngine,
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -83,12 +89,34 @@ pub const Engine = struct {
         var feed = try SyntheticFeed.init(allocator, now_seed);
         errdefer feed.deinit();
 
+        // Heap-allocate risk so the pointer is stable regardless of Engine value movement
+        const risk = try allocator.create(PreTradeRisk);
+        errdefer allocator.destroy(risk);
+        risk.* = try PreTradeRisk.init(allocator, RiskConfig{
+            .max_order_size = 1_000_000_00000000,
+            .max_notional = 50_000_000_00000000,
+            .max_position = 5_000_000_00000000,
+            .max_order_rate = 100,
+            .price_band_pct = 0.10,
+            .dedup_window_ms = 1000,
+        });
+        errdefer risk.deinit();
+
+        const pos_manager = try PositionManager.init(allocator, PositionConfig{
+            .cost_basis_method = .average_cost,
+            .base_currency = "USD",
+        });
+        errdefer {
+            var pm = pos_manager;
+            pm.deinit();
+        }
+
         const oms = try OrderManager.init(
             allocator,
-            &dummy_risk,
+            risk,
             &dummy_store,
-            riskValidateStub,
-            storeAppendStub,
+            riskValidateWrapper,
+            storeAppendNoop,
         );
         errdefer {
             var o = oms;
@@ -113,14 +141,18 @@ pub const Engine = struct {
                 BarAggregator.init(60_000_000_000),
                 BarAggregator.init(60_000_000_000),
             },
-            .positions = undefined,
-            .position_count = 0,
+            .risk = risk,
+            .pos_manager = pos_manager,
+            .matching = MatchingEngine.init(),
         };
     }
 
     pub fn deinit(self: *Engine) void {
         self.feed.deinit();
         self.oms.deinit();
+        self.risk.deinit();
+        self.allocator.destroy(self.risk);
+        self.pos_manager.deinit();
     }
 
     /// Snapshot the L2Book into an OrderbookSnapshot message.
@@ -166,6 +198,35 @@ pub const Engine = struct {
             // Compute timestamp for this tick (tick count x 100ms in ns)
             const timestamp_ns: u64 = self.tick * 100_000_000;
 
+            // Check resting orders against updated books
+            const resting_fills = self.matching.checkRestingOrders(&self.feed.books);
+            for (0..resting_fills.fill_count) |i| {
+                const rf = &resting_fills.fills[i];
+                self.oms.onExecution(rf.order_id, .fill, FillInfo{
+                    .fill_qty = rf.fill_qty,
+                    .fill_price = rf.fill_price,
+                }) catch {};
+                // Determine instrument from order (we don't have easy reverse lookup; use account="demo")
+                self.pos_manager.onFill(Fill{
+                    .instrument = "RESTING",
+                    .side = .buy, // simplified: side not tracked in RestingFill
+                    .quantity = rf.fill_qty,
+                    .price = rf.fill_price,
+                    .timestamp = @intCast(timestamp_ns),
+                    .account = "demo",
+                    .currency = "USD",
+                    .settlement_date = 0,
+                }) catch {};
+            }
+
+            // Update reference prices for risk checks
+            for (0..8) |i| {
+                const book = self.feed.getBook(i);
+                if (book.midPrice()) |mid| {
+                    self.risk.setReferencePrice(INSTRUMENTS[i], mid) catch {};
+                }
+            }
+
             // Push orderbook snapshots and aggregate candles for each instrument
             for (0..8) |i| {
                 const book = self.feed.getBook(i);
@@ -190,14 +251,23 @@ pub const Engine = struct {
                 }
             }
 
-            // Push position updates
-            for (0..self.position_count) |i| {
-                const pos = &self.positions[i];
+            // Push position updates from real position manager
+            const all_positions = self.pos_manager.allPositions();
+            for (all_positions) |pos| {
+                // Find mark price for this instrument
+                var mark_price: i64 = 0;
+                for (0..8) |i| {
+                    if (std.mem.eql(u8, INSTRUMENTS[i], pos.key.instrument)) {
+                        mark_price = self.feed.getBook(i).midPrice() orelse 0;
+                        break;
+                    }
+                }
+                const upnl = self.pos_manager.unrealizedPnl(pos.key, mark_price) orelse 0;
                 const update = msg.PositionUpdate{
-                    .instrument = pos.instrument,
+                    .instrument = InstrumentId.fromSlice(pos.key.instrument),
                     .quantity = pos.quantity,
                     .avg_cost = pos.avg_cost,
-                    .unrealized_pnl = 0, // simplified: no mark prices in demo
+                    .unrealized_pnl = upnl,
                     .realized_pnl = pos.realized_pnl,
                 };
                 _ = self.to_tui.push(EngineEvent{ .position_update = update });
@@ -235,10 +305,11 @@ pub const Engine = struct {
 
     fn handleOrderRequest(self: *Engine, req: msg.OrderRequest) void {
         const instrument_slice = req.instrument.slice();
+        const order_side: oms_mod.Side = if (req.side == 0) .buy else .sell;
         const order = Order{
             .id = 0, // will be assigned by OMS
             .instrument = instrument_slice,
-            .side = if (req.side == 0) .buy else .sell,
+            .side = order_side,
             .order_type = .limit,
             .quantity = req.quantity,
             .price = req.price,
@@ -262,8 +333,56 @@ pub const Engine = struct {
             return;
         };
 
-        // Update position (simple average cost)
-        self.updatePosition(req.instrument, req.side, req.quantity, req.price);
+        // Determine instrument index
+        var instrument_idx: u8 = 0;
+        for (0..INSTRUMENTS.len) |i| {
+            if (std.mem.eql(u8, INSTRUMENTS[i], instrument_slice)) {
+                instrument_idx = @intCast(i);
+                break;
+            }
+        }
+
+        // Process order through matching engine
+        const book = self.feed.getBook(instrument_idx);
+        const fill_result = self.matching.processOrder(
+            order_id,
+            instrument_idx,
+            order_side,
+            req.price,
+            req.quantity,
+            .limit,
+            book,
+        );
+
+        // Process fills
+        var total_filled: i64 = 0;
+        for (0..fill_result.fill_count) |i| {
+            const f = &fill_result.fills[i];
+            total_filled += f.fill_qty;
+            const exec_type: ExecType = if (i + 1 == fill_result.fill_count and
+                total_filled >= req.quantity) .fill else .partial_fill;
+            self.oms.onExecution(order_id, exec_type, FillInfo{
+                .fill_qty = f.fill_qty,
+                .fill_price = f.fill_price,
+            }) catch {};
+            const fill_side: positions_mod.Side = if (order_side == .buy) .buy else .sell;
+            self.pos_manager.onFill(Fill{
+                .instrument = instrument_slice,
+                .side = fill_side,
+                .quantity = f.fill_qty,
+                .price = f.fill_price,
+                .timestamp = @intCast(self.tick * 100_000_000),
+                .account = "demo",
+                .currency = "USD",
+                .settlement_date = 0,
+            }) catch {};
+        }
+
+        // Determine final status
+        const status: u8 = if (total_filled >= req.quantity) 2 // filled
+        else if (fill_result.rested) 1 // new (resting)
+        else if (total_filled > 0) 3 // partially filled
+        else 1; // new
 
         _ = self.to_tui.push(EngineEvent{ .order_update = msg.OrderUpdate{
             .id = order_id,
@@ -271,36 +390,9 @@ pub const Engine = struct {
             .side = req.side,
             .quantity = req.quantity,
             .price = req.price,
-            .status = 1, // new
-            .filled_qty = 0,
+            .status = status,
+            .filled_qty = total_filled,
         } });
-    }
-
-    fn updatePosition(self: *Engine, instrument: InstrumentId, side: u8, quantity: i64, price: i64) void {
-        // Find existing position
-        for (0..self.position_count) |i| {
-            if (std.mem.eql(u8, self.positions[i].instrument.slice(), instrument.slice())) {
-                const pos = &self.positions[i];
-                const delta: i64 = if (side == 0) quantity else -quantity;
-                pos.quantity += delta;
-                // Simple avg cost update
-                if (pos.quantity != 0) {
-                    pos.avg_cost = price; // simplified
-                }
-                return;
-            }
-        }
-        // New position
-        if (self.position_count < 16) {
-            const delta: i64 = if (side == 0) quantity else -quantity;
-            self.positions[self.position_count] = SimplePosition{
-                .instrument = instrument,
-                .quantity = delta,
-                .avg_cost = price,
-                .realized_pnl = 0,
-            };
-            self.position_count += 1;
-        }
     }
 
     /// Request engine to stop (called from TUI thread).
