@@ -74,7 +74,7 @@ pub fn main() !void {
     var orders_buf: [MAX_ORDERS]OrderUpdate = undefined;
     var orders_count: usize = 0;
     var latest_status = std.mem.zeroes(StatusUpdate);
-    var candle_history: [2][64]CandleUpdate = undefined;
+    var candle_history: [2][512]CandleUpdate = undefined;
     var candle_counts: [2]usize = .{ 0, 0 };
     var engine_stopped = false;
     var ticks_since_event: u32 = 0;
@@ -83,6 +83,10 @@ pub fn main() !void {
     var bbo_history_count: [2]usize = .{ 0, 0 };
     var frame_count: u64 = 0;
     var order_arrival_frame: [MAX_ORDERS]u64 = std.mem.zeroes([MAX_ORDERS]u64);
+    var viewport_offset: [2]usize = .{ 0, 0 }; // per-instrument scroll offset
+    var candle_width: u8 = 3; // shared zoom level
+    var crosshair_active: bool = false;
+    var crosshair_idx: [2]usize = .{ 0, 0 }; // per-instrument cursor position
 
     // Input and focus state
     var input_handler = InputHandler.init();
@@ -182,8 +186,8 @@ pub fn main() !void {
                             break;
                         }
                     }
-                    // Append to ring buffer (overwrite oldest if at 64)
-                    const slot = candle_counts[idx] % 64;
+                    // Append to ring buffer (overwrite oldest if at 512)
+                    const slot = candle_counts[idx] % 512;
                     candle_history[idx][slot] = cu;
                     candle_counts[idx] += 1;
                 },
@@ -218,8 +222,8 @@ pub fn main() !void {
         }
 
         // Chart panel (top-right, replaces positions panel in tab cycle)
-        const candle_len = @min(candle_counts[active_instrument], 64);
-        chart_panel.draw(&renderer, panels.chart, candle_history[active_instrument][0..candle_len], theme);
+        const candle_len = @min(candle_counts[active_instrument], 512);
+        chart_panel.draw(&renderer, panels.chart, candle_history[active_instrument][0..candle_len], theme, viewport_offset[active_instrument], candle_width, crosshair_active, crosshair_idx[active_instrument]);
 
         // Order entry panel
         order_entry.draw(&renderer, panels.order_entry, active_panel == PANEL_ORDER_ENTRY, theme);
@@ -252,7 +256,8 @@ pub fn main() !void {
         // Process frame boundary escape reset
         if (input_handler.frameReset()) |act| {
             _ = processAction(&input_handler, act, &active_panel, &active_instrument, &order_entry,
-                &from_tui, &status_msg, &status_msg_len, &status_msg_frames, &show_positions_overlay);
+                &from_tui, &status_msg, &status_msg_len, &status_msg_frames, &show_positions_overlay,
+                &viewport_offset, &candle_width, &candle_counts, &crosshair_active, &crosshair_idx);
         }
 
         // Process input bytes
@@ -260,7 +265,8 @@ pub fn main() !void {
             const text_mode = (active_panel == PANEL_ORDER_ENTRY);
             if (input_handler.feed(byte, text_mode)) |act| {
                 const should_quit = processAction(&input_handler, act, &active_panel, &active_instrument,
-                    &order_entry, &from_tui, &status_msg, &status_msg_len, &status_msg_frames, &show_positions_overlay);
+                    &order_entry, &from_tui, &status_msg, &status_msg_len, &status_msg_frames, &show_positions_overlay,
+                    &viewport_offset, &candle_width, &candle_counts, &crosshair_active, &crosshair_idx);
                 if (should_quit) {
                     _ = from_tui.push(UserCommand{ .quit = {} });
                     goto_done = true;
@@ -293,6 +299,11 @@ fn processAction(
     status_msg_len: *usize,
     status_msg_frames: *u32,
     show_positions_overlay: *bool,
+    viewport_offset: *[2]usize,
+    candle_width: *u8,
+    candle_counts: *[2]usize,
+    crosshair_active: *bool,
+    crosshair_idx: *[2]usize,
 ) bool {
     _ = _handler;
     switch (action) {
@@ -333,6 +344,77 @@ fn processAction(
             if (active_panel.* == PANEL_ORDER_ENTRY) {
                 _ = order_entry.handleAction(action);
             }
+        },
+        .arrow_left => {
+            if (active_panel.* != PANEL_ORDER_ENTRY) {
+                const idx = active_instrument.*;
+                if (crosshair_active.*) {
+                    // Move crosshair left (clamp to 0)
+                    if (crosshair_idx.*[idx] > 0) {
+                        crosshair_idx.*[idx] -= 1;
+                    }
+                } else {
+                    // Scroll left (further back in history)
+                    const total = candle_counts.*[idx];
+                    if (viewport_offset.*[idx] == 0) {
+                        // Start scroll: offset > 0 means scrolled from right edge
+                        // 0 = auto-follow; increment to 1 to start scrolling
+                        if (total > 1) viewport_offset.*[idx] = 1;
+                    } else {
+                        viewport_offset.*[idx] += 1;
+                        // Clamp to max meaningful offset (total candles - 1)
+                        if (viewport_offset.*[idx] >= total) {
+                            viewport_offset.*[idx] = if (total > 0) total - 1 else 0;
+                        }
+                    }
+                }
+            }
+        },
+        .arrow_right => {
+            if (active_panel.* != PANEL_ORDER_ENTRY) {
+                const idx = active_instrument.*;
+                if (crosshair_active.*) {
+                    // Move crosshair right (clamped to visible_candles - 1)
+                    // We don't know visible count here without panel size, so use a generous max
+                    const total = candle_counts.*[idx];
+                    if (total > 0 and crosshair_idx.*[idx] + 1 < total) {
+                        crosshair_idx.*[idx] += 1;
+                    }
+                } else {
+                    // Scroll right (toward newest candles)
+                    if (viewport_offset.*[idx] > 1) {
+                        viewport_offset.*[idx] -= 1;
+                    } else {
+                        // Back to auto-follow
+                        viewport_offset.*[idx] = 0;
+                    }
+                }
+            }
+        },
+        .toggle_crosshair => {
+            const idx = active_instrument.*;
+            crosshair_active.* = !crosshair_active.*;
+            if (crosshair_active.*) {
+                // When activating, set to last visible candle index
+                const total = candle_counts.*[idx];
+                crosshair_idx.*[idx] = if (total > 0) total - 1 else 0;
+            }
+        },
+        .zoom_in => {
+            // Cycle candle_width: 1 → 3 → 5 → 1
+            candle_width.* = switch (candle_width.*) {
+                1 => 3,
+                3 => 5,
+                else => 1,
+            };
+        },
+        .zoom_out => {
+            // Cycle candle_width: 5 → 3 → 1 → 5
+            candle_width.* = switch (candle_width.*) {
+                5 => 3,
+                3 => 1,
+                else => 5,
+            };
         },
         .enter => {
             if (active_panel.* == PANEL_ORDER_ENTRY) {

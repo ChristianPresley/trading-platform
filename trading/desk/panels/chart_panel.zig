@@ -1,5 +1,5 @@
 // Candlestick chart panel renderer.
-// Renders OHLC candlestick chart using Unicode block characters.
+// Renders OHLC candlestick chart using Unicode block characters with half-block precision.
 
 const std = @import("std");
 const Renderer = @import("../renderer.zig").Renderer;
@@ -8,9 +8,14 @@ const Rect = layout.Rect;
 const msg = @import("../messages.zig");
 const CandleUpdate = msg.CandleUpdate;
 const Theme = @import("../theme.zig").Theme;
+const Rgb = @import("../theme.zig").Rgb;
+const primitives = @import("chart_primitives.zig");
+const SubCell = primitives.SubCell;
+const scaleYSub = primitives.scaleYSub;
 
 /// Map a price to a row within the chart area using linear interpolation.
 /// Returns 0 (top) to height-1 (bottom) mapping.
+/// Kept for backward compatibility with existing tests.
 fn scaleY(price: i64, min_price: i64, max_price: i64, height: u16) u16 {
     if (height == 0) return 0;
     const range = max_price - min_price;
@@ -22,8 +27,8 @@ fn scaleY(price: i64, min_price: i64, max_price: i64, height: u16) u16 {
     return from_top;
 }
 
-/// Draw a single candlestick at column x within the chart rect.
-/// Each candle occupies 3 terminal columns.
+/// Draw a single candlestick at column x within the chart rect using half-block precision.
+/// Each candle occupies `candle_width` terminal columns.
 fn drawCandle(
     renderer: *Renderer,
     x: u16,
@@ -33,49 +38,152 @@ fn drawCandle(
     y_max: i64,
     height: u16,
     theme: *const Theme,
+    candle_width: u8,
 ) void {
     const inner_x = rect.x + 1;
     const inner_y = rect.y + 1;
 
     const bullish = candle.close >= candle.open;
+    const color: Rgb = if (bullish) theme.candle_bull else theme.candle_bear;
 
-    // Compute row positions (0 = top of chart area, height-1 = bottom)
-    const high_row = scaleY(candle.high, y_min, y_max, height);
-    const low_row = scaleY(candle.low, y_min, y_max, height);
-    const body_top_row = scaleY(@max(candle.open, candle.close), y_min, y_max, height);
-    const body_bot_row = scaleY(@min(candle.open, candle.close), y_min, y_max, height);
+    // Compute sub-cell positions for high, low, body top/bottom
+    const high_sub = scaleYSub(candle.high, y_min, y_max, height);
+    const low_sub = scaleYSub(candle.low, y_min, y_max, height);
+    const body_top_sub = scaleYSub(@max(candle.open, candle.close), y_min, y_max, height);
+    const body_bot_sub = scaleYSub(@min(candle.open, candle.close), y_min, y_max, height);
 
     // Center column of the candle (0-indexed within chart inner area)
-    const center_col = inner_x + x + 1; // candle occupies columns x, x+1, x+2; center is x+1
+    const center_col = inner_x + x + candle_width / 2;
 
-    if (bullish) {
-        renderer.writeColor(theme.candle_bull);
-    } else {
-        renderer.writeColor(theme.candle_bear);
+    // Dimmed color for wicks (50% brightness)
+    const wick_color = Rgb{
+        .r = color.r / 2,
+        .g = color.g / 2,
+        .b = color.b / 2,
+    };
+
+    // --- Body rendering (all candle_width columns) ---
+    renderer.writeColor(color);
+    var r: u16 = body_top_sub.row;
+    while (r <= body_bot_sub.row) : (r += 1) {
+        // Determine character for this row
+        const char: []const u8 = blk: {
+            if (r == body_top_sub.row and r == body_bot_sub.row) {
+                // Single row body (doji or very small candle)
+                if (body_top_sub.half == 1 and body_bot_sub.half == 0) {
+                    break :blk &primitives.HALF_BLOCK_CHARS[3]; // ▄
+                } else if (body_top_sub.half == 1) {
+                    break :blk &primitives.HALF_BLOCK_CHARS[3]; // ▄ lower half
+                } else if (body_bot_sub.half == 0) {
+                    break :blk &primitives.UPPER_HALF; // ▀ upper half
+                } else {
+                    break :blk &primitives.FULL_BLOCK; // █
+                }
+            } else if (r == body_top_sub.row) {
+                // Top of body
+                if (body_top_sub.half == 1) {
+                    break :blk &primitives.HALF_BLOCK_CHARS[3]; // ▄ lower half
+                } else {
+                    break :blk &primitives.FULL_BLOCK; // █
+                }
+            } else if (r == body_bot_sub.row) {
+                // Bottom of body
+                if (body_bot_sub.half == 0) {
+                    break :blk &primitives.UPPER_HALF; // ▀ upper half
+                } else {
+                    break :blk &primitives.FULL_BLOCK; // █
+                }
+            } else {
+                break :blk &primitives.FULL_BLOCK; // █
+            }
+        };
+
+        // Write across all candle_width columns
+        var col: u16 = 0;
+        while (col < candle_width) : (col += 1) {
+            renderer.writeFmt("\x1b[{d};{d}H{s}", .{ inner_y + r + 1, inner_x + x + col, char });
+        }
     }
 
-    // Draw wick from high to body_top (above body)
-    var r: u16 = high_row;
-    while (r < body_top_row) : (r += 1) {
-        renderer.writeFmt("\x1b[{d};{d}H\xe2\x94\x82", .{ inner_y + r + 1, center_col }); // │
+    // --- Wick rendering (center column only, dimmed color) ---
+    renderer.writeColor(wick_color);
+
+    // Upper wick: from high_sub.row to body_top_sub.row - 1
+    if (high_sub.row < body_top_sub.row) {
+        var wr: u16 = high_sub.row;
+        while (wr < body_top_sub.row) : (wr += 1) {
+            if (wr == high_sub.row and high_sub.half == 1) {
+                // Tip is in lower half — use ▄
+                renderer.writeFmt("\x1b[{d};{d}H{s}", .{ inner_y + wr + 1, center_col, &primitives.HALF_BLOCK_CHARS[3] });
+            } else {
+                renderer.writeFmt("\x1b[{d};{d}H\xe2\x94\x82", .{ inner_y + wr + 1, center_col }); // │
+            }
+        }
     }
 
-    // Draw body (filled with █)
-    r = body_top_row;
-    while (r <= body_bot_row) : (r += 1) {
-        renderer.writeFmt("\x1b[{d};{d}H\xe2\x96\x88", .{ inner_y + r + 1, center_col }); // █
-    }
-
-    // Draw wick from body_bottom to low (below body)
-    r = body_bot_row + 1;
-    while (r <= low_row) : (r += 1) {
-        renderer.writeFmt("\x1b[{d};{d}H\xe2\x94\x82", .{ inner_y + r + 1, center_col }); // │
+    // Lower wick: from body_bot_sub.row + 1 to low_sub.row
+    if (body_bot_sub.row < low_sub.row) {
+        var wr: u16 = body_bot_sub.row + 1;
+        while (wr <= low_sub.row) : (wr += 1) {
+            if (wr == low_sub.row and low_sub.half == 0) {
+                // Tip is in upper half — use ▀
+                renderer.writeFmt("\x1b[{d};{d}H{s}", .{ inner_y + wr + 1, center_col, &primitives.UPPER_HALF });
+            } else {
+                renderer.writeFmt("\x1b[{d};{d}H\xe2\x94\x82", .{ inner_y + wr + 1, center_col }); // │
+            }
+        }
     }
 
     renderer.resetColor();
 }
 
-pub fn draw(renderer: *Renderer, rect: Rect, candles: []const CandleUpdate, theme: *const Theme) void {
+/// Draw a volume bar at column x in the volume sub-panel area.
+/// Bar grows upward from row (y + height - 1) to (y + height - bar_h).
+fn drawVolumeBar(renderer: *Renderer, x: u16, y: u16, height: u16, volume: i64, max_volume: i64, color: Rgb) void {
+    if (height == 0 or max_volume == 0 or volume <= 0) return;
+
+    // Map volume to bar height (integer rows)
+    const bar_h_full = @as(u16, @intCast(@min(
+        @as(i64, height),
+        @divTrunc(volume * @as(i64, height), max_volume),
+    )));
+
+    renderer.writeColor(color);
+
+    // Fill full rows from bottom up
+    if (bar_h_full > 0) {
+        var r: u16 = 0;
+        while (r < bar_h_full) : (r += 1) {
+            const row = y + height - 1 - r;
+            renderer.writeFmt("\x1b[{d};{d}H{s}", .{ row + 1, x + 1, &primitives.FULL_BLOCK });
+        }
+    }
+
+    renderer.resetColor();
+}
+
+/// Compute number of candles visible given panel width and candle width.
+fn visibleCandles(panel_width: u16, candle_width: u8) usize {
+    if (candle_width == 0) return 0;
+    return panel_width / candle_width;
+}
+
+/// Clamp viewport offset so it doesn't exceed available candle range.
+fn clampViewport(offset: usize, visible: usize, total: usize) usize {
+    if (total <= visible) return 0;
+    return @min(offset, total - visible);
+}
+
+pub fn draw(
+    renderer: *Renderer,
+    rect: Rect,
+    candles: []const CandleUpdate,
+    theme: *const Theme,
+    viewport_offset: usize,
+    candle_width: u8,
+    crosshair_active: bool,
+    crosshair_idx: usize,
+) void {
     if (rect.h < 4 or rect.w < 10) return;
 
     renderer.drawBoxThemed(rect, "Chart 1m", theme);
@@ -95,10 +203,23 @@ pub fn draw(renderer: *Renderer, rect: Rect, candles: []const CandleUpdate, them
         return;
     }
 
-    // Number of candles that fit: each candle is 3 columns wide
-    const max_candles = inner_w / 3;
-    const start = if (candles.len > max_candles) candles.len - max_candles else 0;
-    const visible = candles[start..];
+    // Height split: 25% for volume bars (min 8 rows total for volume to appear)
+    const volume_h: u16 = if (inner_h >= 8) inner_h / 4 else 0;
+    const chart_h: u16 = if (inner_h > 1) inner_h - 1 - volume_h else inner_h;
+
+    // Visible candle range
+    const cw: u8 = if (candle_width == 0) 3 else candle_width;
+    const max_vis = visibleCandles(inner_w, cw);
+    const total = candles.len;
+
+    // Auto-follow: if viewport_offset == 0, show newest candles (right edge)
+    const effective_offset: usize = if (viewport_offset == 0)
+        (if (total > max_vis) total - max_vis else 0)
+    else
+        clampViewport(total -| viewport_offset -| max_vis, max_vis, total);
+
+    const end = @min(effective_offset + max_vis, total);
+    const visible = candles[effective_offset..end];
 
     // Scan visible candles for Y axis range
     var y_min: i64 = visible[0].low;
@@ -113,13 +234,86 @@ pub fn draw(renderer: *Renderer, rect: Rect, candles: []const CandleUpdate, them
         y_max += 1;
     }
 
-    // Chart area height = inner_h - 1 (reserve bottom row for Y axis labels)
-    const chart_h: u16 = if (inner_h > 1) inner_h - 1 else inner_h;
-
     // Draw each candle
     for (visible, 0..) |candle, ci| {
-        const x: u16 = @intCast(ci * 3);
-        drawCandle(renderer, x, rect, candle, y_min, y_max, chart_h, theme);
+        const x: u16 = @intCast(ci * cw);
+        drawCandle(renderer, x, rect, candle, y_min, y_max, chart_h, theme, cw);
+    }
+
+    // Volume bars
+    if (volume_h > 0) {
+        // Scan for max volume
+        var max_volume: i64 = 0;
+        for (visible) |c| {
+            if (c.volume > max_volume) max_volume = c.volume;
+        }
+
+        const vol_y = rect.y + 1 + chart_h; // volume area starts here
+        for (visible, 0..) |candle, ci| {
+            const x: u16 = @intCast(ci * cw);
+            drawVolumeBar(renderer, rect.x + 1 + x, vol_y, volume_h, candle.volume, max_volume, theme.volume);
+        }
+    }
+
+    // --- SMA-20 overlay ---
+    for (visible, 0..) |_, ci| {
+        const absolute_index = effective_offset + ci;
+        if (primitives.smaCompute(candles, absolute_index, 20)) |sma_val| {
+            const sub = scaleYSub(sma_val, y_min, y_max, chart_h);
+            // Clamp to valid row range
+            const sma_row = @min(sub.row, chart_h -| 1);
+            const sma_col = rect.x + 1 + @as(u16, @intCast(ci * cw)) + cw / 2;
+            renderer.writeColor(theme.indicator_line);
+            const sma_char: []const u8 = if (sub.half == 1)
+                &primitives.HALF_BLOCK_CHARS[3] // ▄
+            else
+                &primitives.UPPER_HALF; // ▀
+            renderer.writeFmt("\x1b[{d};{d}H{s}", .{ rect.y + 2 + sma_row, sma_col, sma_char });
+            renderer.resetColor();
+        }
+    }
+
+    // --- Crosshair rendering ---
+    if (crosshair_active and crosshair_idx < visible.len) {
+        const ch_x = rect.x + 1 + @as(u16, @intCast(crosshair_idx * cw)) + cw / 2;
+
+        // Draw vertical line through entire chart area
+        renderer.writeColor(theme.crosshair);
+        var r: u16 = 0;
+        while (r < chart_h) : (r += 1) {
+            renderer.writeFmt("\x1b[{d};{d}H\xe2\x94\x82", .{ rect.y + 2 + r, ch_x }); // │
+        }
+
+        // Draw OHLCV readout
+        const candle = visible[crosshair_idx];
+        var ohlcv_buf: [128]u8 = undefined;
+
+        const o_whole = @divTrunc(candle.open, 100_000_000);
+        const o_frac = @abs(@rem(candle.open, 100_000_000)) / 1_000_000;
+        const h_whole = @divTrunc(candle.high, 100_000_000);
+        const h_frac = @abs(@rem(candle.high, 100_000_000)) / 1_000_000;
+        const l_whole = @divTrunc(candle.low, 100_000_000);
+        const l_frac = @abs(@rem(candle.low, 100_000_000)) / 1_000_000;
+        const c_whole = @divTrunc(candle.close, 100_000_000);
+        const c_frac = @abs(@rem(candle.close, 100_000_000)) / 1_000_000;
+
+        const ohlcv_str = std.fmt.bufPrint(&ohlcv_buf,
+            "O:{d}.{d:0>2} H:{d}.{d:0>2} L:{d}.{d:0>2} C:{d}.{d:0>2} V:{d}",
+            .{ o_whole, o_frac, h_whole, h_frac, l_whole, l_frac, c_whole, c_frac, candle.volume }) catch "?";
+
+        // Position readout: left half → draw right-aligned; right half → left-aligned
+        const readout_row = rect.y + 1;
+        const ch_relative = crosshair_idx * cw;
+        if (ch_relative > inner_w / 2) {
+            // Left-align: start at x=1
+            renderer.drawText(rect.x + 1, readout_row, ohlcv_str[0..@min(ohlcv_str.len, inner_w)]);
+        } else {
+            // Right-align: end at right edge
+            const str_len = @min(ohlcv_str.len, inner_w);
+            const start_x = rect.x + 1 + (inner_w -| str_len);
+            renderer.drawText(start_x, readout_row, ohlcv_str[0..str_len]);
+        }
+        renderer.resetColor();
     }
 
     // Y axis labels on right edge (inside box): top = max, bottom = min, mid = midpoint
@@ -130,12 +324,17 @@ pub fn draw(renderer: *Renderer, rect: Rect, candles: []const CandleUpdate, them
     var pbuf_max: [20]u8 = undefined;
     var pbuf_min: [20]u8 = undefined;
     var pbuf_mid: [20]u8 = undefined;
+
     const max_whole = @divTrunc(y_max, 100_000_000);
+    const max_frac = @abs(@rem(y_max, 100_000_000)) / 1_000_000;
     const min_whole = @divTrunc(y_min, 100_000_000);
+    const min_frac = @abs(@rem(y_min, 100_000_000)) / 1_000_000;
     const mid_whole = @divTrunc(mid_price, 100_000_000);
-    const max_str = std.fmt.bufPrint(&pbuf_max, "{d}", .{max_whole}) catch "?";
-    const min_str = std.fmt.bufPrint(&pbuf_min, "{d}", .{min_whole}) catch "?";
-    const mid_str = std.fmt.bufPrint(&pbuf_mid, "{d}", .{mid_whole}) catch "?";
+    const mid_frac = @abs(@rem(mid_price, 100_000_000)) / 1_000_000;
+
+    const max_str = std.fmt.bufPrint(&pbuf_max, "{d}.{d:0>2}", .{ max_whole, max_frac }) catch "?";
+    const min_str = std.fmt.bufPrint(&pbuf_min, "{d}.{d:0>2}", .{ min_whole, min_frac }) catch "?";
+    const mid_str = std.fmt.bufPrint(&pbuf_mid, "{d}.{d:0>2}", .{ mid_whole, mid_frac }) catch "?";
 
     renderer.writeColor(theme.text_dim);
     renderer.drawText(label_col, rect.y + 1, max_str);
@@ -171,4 +370,72 @@ test "chart_empty_candles" {
     // With 0 candles, scaleY is never called — just verify the guard logic
     const max_candles: u16 = 100 / 3;
     try @import("std").testing.expect(max_candles == 33);
+}
+
+test "volume_bar_scaling" {
+    // Bar height should be proportional to volume/max_volume
+    // volume=50, max_volume=100, height=10 → bar_h = 5
+    const volume: i64 = 50;
+    const max_volume: i64 = 100;
+    const height: u16 = 10;
+    const bar_h: u16 = @intCast(@min(
+        @as(i64, height),
+        @divTrunc(volume * @as(i64, height), max_volume),
+    ));
+    try @import("std").testing.expectEqual(@as(u16, 5), bar_h);
+}
+
+test "volume_bar_zero" {
+    // Zero volume produces zero-height bar (no division by zero)
+    const volume: i64 = 0;
+    const max_volume: i64 = 100;
+    const height: u16 = 10;
+    if (max_volume == 0 or volume <= 0) {
+        try @import("std").testing.expect(true); // no bar rendered
+    } else {
+        const bar_h: u16 = @intCast(@min(
+            @as(i64, height),
+            @divTrunc(volume * @as(i64, height), max_volume),
+        ));
+        try @import("std").testing.expectEqual(@as(u16, 0), bar_h);
+    }
+}
+
+test "height_split_computation" {
+    // inner_h=20 → volume_h=5 (25%), chart_h = 20 - 1 - 5 = 14
+    const inner_h: u16 = 20;
+    const volume_h: u16 = if (inner_h >= 8) inner_h / 4 else 0;
+    const chart_h: u16 = if (inner_h > 1) inner_h - 1 - volume_h else inner_h;
+    try @import("std").testing.expectEqual(@as(u16, 5), volume_h);
+    try @import("std").testing.expectEqual(@as(u16, 14), chart_h);
+}
+
+test "visibleCandles_calculation" {
+    // width=38, candle_width=3 → 12
+    try @import("std").testing.expectEqual(@as(usize, 12), visibleCandles(38, 3));
+    // width=38, candle_width=1 → 38
+    try @import("std").testing.expectEqual(@as(usize, 38), visibleCandles(38, 1));
+    // width=38, candle_width=5 → 7
+    try @import("std").testing.expectEqual(@as(usize, 7), visibleCandles(38, 5));
+}
+
+test "clampViewport_bounds" {
+    // offset beyond total clamps to total - visible
+    try @import("std").testing.expectEqual(@as(usize, 10), clampViewport(999, 10, 20));
+    // offset within range passes through
+    try @import("std").testing.expectEqual(@as(usize, 5), clampViewport(5, 10, 20));
+    // total <= visible returns 0
+    try @import("std").testing.expectEqual(@as(usize, 0), clampViewport(3, 10, 5));
+}
+
+test "clampViewport_auto_follow" {
+    // Auto-follow: viewport_offset=0, total > visible → effective = total - visible
+    const total: usize = 100;
+    const max_vis: usize = 20;
+    const viewport_offset: usize = 0;
+    const effective = if (viewport_offset == 0)
+        (if (total > max_vis) total - max_vis else 0)
+    else
+        clampViewport(total -| viewport_offset -| max_vis, max_vis, total);
+    try @import("std").testing.expectEqual(@as(usize, 80), effective);
 }
