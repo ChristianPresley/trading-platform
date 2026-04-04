@@ -48,6 +48,27 @@ const ChildOrder = twap_mod_algo.ChildOrder;
 
 const SyntheticFeed_mod = @import("synthetic.zig");
 
+const vpin_mod_analytics = @import("vpin");
+const VpinCalculator = vpin_mod_analytics.VpinCalculator;
+
+const tca_mod_analytics = @import("tca");
+const TcaEngine = tca_mod_analytics.TcaEngine;
+const TcaExecution = tca_mod_analytics.Execution;
+const TcaBenchmark = tca_mod_analytics.Benchmark;
+
+const eod_mod_analytics = @import("eod");
+const EodProcessor = eod_mod_analytics.EodProcessor;
+const EodPositionView = eod_mod_analytics.EodPositionView;
+const EodMark = eod_mod_analytics.Mark;
+
+const TcaPending = struct {
+    algo_idx: usize,
+    fills: [128]TcaExecution,
+    fill_count: usize,
+    benchmark: TcaBenchmark,
+    active: bool,
+};
+
 const ActiveAlgo = struct {
     twap: TwapAlgo,
     parent_order_id: u64,
@@ -110,6 +131,16 @@ pub const Engine = struct {
     active_algos: [16]ActiveAlgo,
     active_algo_count: usize,
 
+    // Analytics and post-trade
+    vpin: [8]VpinCalculator,
+    tca_engine: TcaEngine,
+    eod_processor: EodProcessor,
+    tca_pending: [16]TcaPending,
+    tca_pending_count: usize,
+    eod_tick_counter: u64,
+    vpin_scores: [8]i64,
+    vpin_valid: [8]bool,
+
     pub fn init(
         allocator: std.mem.Allocator,
         to_tui: *SpscRingBuffer(EngineEvent),
@@ -169,6 +200,20 @@ pub const Engine = struct {
             o.deinit();
         }
 
+        // Initialize 8 VPIN calculators
+        var vpin_calcs: [8]VpinCalculator = undefined;
+        var vpin_initialized: usize = 0;
+        errdefer {
+            for (0..vpin_initialized) |i| vpin_calcs[i].deinit();
+        }
+        for (0..8) |i| {
+            vpin_calcs[i] = try VpinCalculator.init(allocator, 100_000_00000000, 20);
+            vpin_initialized += 1;
+        }
+
+        const tca_engine = try TcaEngine.init(allocator);
+        const eod_processor = try EodProcessor.init(allocator);
+
         return Engine{
             .allocator = allocator,
             .to_tui = to_tui,
@@ -194,6 +239,14 @@ pub const Engine = struct {
             .funding_arb_strategy = funding_arb_strategy,
             .active_algos = std.mem.zeroes([16]ActiveAlgo),
             .active_algo_count = 0,
+            .vpin = vpin_calcs,
+            .tca_engine = tca_engine,
+            .eod_processor = eod_processor,
+            .tca_pending = std.mem.zeroes([16]TcaPending),
+            .tca_pending_count = 0,
+            .eod_tick_counter = 0,
+            .vpin_scores = std.mem.zeroes([8]i64),
+            .vpin_valid = std.mem.zeroes([8]bool),
         };
     }
 
@@ -205,6 +258,9 @@ pub const Engine = struct {
         self.pos_manager.deinit();
         self.basis_strategy.deinit();
         self.funding_arb_strategy.deinit();
+        for (&self.vpin) |*v| v.deinit();
+        self.tca_engine.deinit();
+        self.eod_processor.deinit();
     }
 
     /// Snapshot the L2Book into an OrderbookSnapshot message.
@@ -279,9 +335,12 @@ pub const Engine = struct {
                 }
             }
 
+            // Run analytics and post-trade
+            self.runVpin();
             // Run strategies and algos
             self.runStrategies();
             self.runAlgos();
+            self.runEod();
 
             // Push orderbook snapshots and aggregate candles for each instrument
             for (0..8) |i| {
@@ -340,7 +399,7 @@ pub const Engine = struct {
                 },
             ) catch strat_state_buf[0..0];
 
-            // Push status
+            // Push status with VPIN scores
             var status_update = msg.StatusUpdate{
                 .tick = self.tick,
                 .engine_time_ns = 0,
@@ -348,6 +407,8 @@ pub const Engine = struct {
                 .connected = false,
                 .strategy_state = std.mem.zeroes([64]u8),
                 .strategy_state_len = 0,
+                .vpin_scores = self.vpin_scores,
+                .vpin_valid = self.vpin_valid,
             };
             @memcpy(status_update.strategy_state[0..strat_state_str.len], strat_state_str);
             status_update.strategy_state_len = @intCast(strat_state_str.len);
@@ -373,6 +434,85 @@ pub const Engine = struct {
 
             std.Thread.sleep(100_000_000); // 100ms per tick
         }
+    }
+
+    fn runVpin(self: *Engine) void {
+        for (0..8) |i| {
+            const book = self.feed.getBook(i);
+            const mid = book.midPrice() orelse continue;
+            // Use price direction as proxy for trade side
+            const side: vpin_mod_analytics.Side = .buy; // default to buy; tick rule would need last price
+            if (self.vpin[i].onTrade(mid, 1, side)) |score| {
+                // Store VPIN as i64 scaled by 10000 (VPIN is 0.0-1.0)
+                self.vpin_scores[i] = @intFromFloat(score * 10000.0);
+                self.vpin_valid[i] = true;
+            }
+        }
+    }
+
+    fn completeTca(self: *Engine, pending_idx: usize) void {
+        const pending = &self.tca_pending[pending_idx];
+        if (!pending.active) return;
+
+        const fills_slice = pending.fills[0..pending.fill_count];
+        const report = self.tca_engine.analyze(fills_slice, pending.benchmark) catch return;
+
+        // Push TCA report event
+        const instrument_name: []const u8 = if (pending.algo_idx < self.active_algo_count)
+            INSTRUMENTS[self.active_algos[pending.algo_idx].instrument_idx]
+        else
+            "UNKNOWN";
+
+        const tca_event = msg.TcaReportEvent{
+            .instrument = msg.InstrumentId.fromSlice(instrument_name),
+            .is_cost_bps = @intFromFloat(report.is_cost_bps * 100.0),
+            .fill_rate_pct = @intFromFloat(@min(report.fill_rate * 100.0, 100.0)),
+            .market_impact_bps = @intFromFloat(report.market_impact_bps * 100.0),
+        };
+        _ = self.to_tui.push(EngineEvent{ .tca_report = tca_event });
+        pending.active = false;
+    }
+
+    fn runEod(self: *Engine) void {
+        self.eod_tick_counter += 1;
+        if (self.eod_tick_counter < 6000) return;
+        self.eod_tick_counter = 0;
+
+        // Build EodPositionView array from position manager
+        const all_positions = self.pos_manager.allPositions();
+        var pos_views: [64]EodPositionView = undefined;
+        const pos_count = @min(all_positions.len, 64);
+        for (0..pos_count) |i| {
+            const pos = &all_positions[i];
+            pos_views[i] = EodPositionView{
+                .instrument = pos.key.instrument,
+                .quantity = pos.quantity,
+                .avg_cost = pos.avg_cost,
+                .realized_pnl = pos.realized_pnl,
+            };
+        }
+
+        // Build mark prices from current mid prices
+        var marks: [8]EodMark = undefined;
+        for (0..8) |i| {
+            marks[i] = EodMark{
+                .instrument = INSTRUMENTS[i],
+                .price = self.feed.getBook(i).midPrice() orelse 0,
+            };
+        }
+
+        const report = self.eod_processor.computeDailyPnl(
+            pos_views[0..pos_count],
+            marks[0..8],
+        ) catch return;
+
+        const eod_event = msg.EodReportEvent{
+            .realized_pnl = report.realized_pnl,
+            .unrealized_pnl = report.unrealized_pnl,
+            .total_pnl = report.total_pnl,
+            .tick = self.tick,
+        };
+        _ = self.to_tui.push(EngineEvent{ .eod_report = eod_event });
     }
 
     fn runStrategies(self: *Engine) void {
@@ -408,7 +548,8 @@ pub const Engine = struct {
                     .jitter_pct = 0.1,
                 });
                 const arrival_price = btc_spot_book.midPrice() orelse 0;
-                self.active_algos[self.active_algo_count] = ActiveAlgo{
+                const algo_idx = self.active_algo_count;
+                self.active_algos[algo_idx] = ActiveAlgo{
                     .twap = spot_twap,
                     .parent_order_id = self.oms.next_id,
                     .instrument_idx = @intCast(btc_spot_idx),
@@ -417,6 +558,22 @@ pub const Engine = struct {
                     .active = true,
                 };
                 self.active_algo_count += 1;
+                // Create TcaPending for this algo
+                if (self.tca_pending_count < 16) {
+                    self.tca_pending[self.tca_pending_count] = TcaPending{
+                        .algo_idx = algo_idx,
+                        .fills = std.mem.zeroes([128]TcaExecution),
+                        .fill_count = 0,
+                        .benchmark = TcaBenchmark{
+                            .arrival_price = arrival_price,
+                            .market_vwap = arrival_price,
+                            .close_price = arrival_price,
+                            .attempted_qty = signal.spot_qty,
+                        },
+                        .active = true,
+                    };
+                    self.tca_pending_count += 1;
+                }
             }
         }
 
@@ -442,7 +599,8 @@ pub const Engine = struct {
                     .jitter_pct = 0.1,
                 });
                 const arrival_price = eth_spot_mid;
-                self.active_algos[self.active_algo_count] = ActiveAlgo{
+                const algo_idx_eth = self.active_algo_count;
+                self.active_algos[algo_idx_eth] = ActiveAlgo{
                     .twap = spot_twap,
                     .parent_order_id = self.oms.next_id,
                     .instrument_idx = @intCast(eth_spot_idx),
@@ -451,6 +609,22 @@ pub const Engine = struct {
                     .active = true,
                 };
                 self.active_algo_count += 1;
+                // Create TcaPending for this algo
+                if (self.tca_pending_count < 16) {
+                    self.tca_pending[self.tca_pending_count] = TcaPending{
+                        .algo_idx = algo_idx_eth,
+                        .fills = std.mem.zeroes([128]TcaExecution),
+                        .fill_count = 0,
+                        .benchmark = TcaBenchmark{
+                            .arrival_price = arrival_price,
+                            .market_vwap = arrival_price,
+                            .close_price = arrival_price,
+                            .attempted_qty = signal.spot_qty,
+                        },
+                        .active = true,
+                    };
+                    self.tca_pending_count += 1;
+                }
             }
         }
         // Also run convergence monitoring
@@ -501,6 +675,7 @@ pub const Engine = struct {
                         .fill_price = f.fill_price,
                     }) catch {};
                     const fill_side: positions_mod.Side = if (child_side == .buy) .buy else .sell;
+                    const tca_fill_side: tca_mod_analytics.Side = if (child_side == .buy) .buy else .sell;
                     self.pos_manager.onFill(Fill{
                         .instrument = child.instrument,
                         .side = fill_side,
@@ -512,11 +687,34 @@ pub const Engine = struct {
                         .settlement_date = 0,
                     }) catch {};
                     algo.twap.onFill(.{ .quantity = f.fill_qty, .price = f.fill_price });
+
+                    // Record fill in TcaPending
+                    for (0..self.tca_pending_count) |tp_idx| {
+                        const tp = &self.tca_pending[tp_idx];
+                        if (tp.active and tp.algo_idx == i and tp.fill_count < 128) {
+                            tp.fills[tp.fill_count] = TcaExecution{
+                                .price = f.fill_price,
+                                .quantity = f.fill_qty,
+                                .timestamp = current_tick_ns,
+                                .side = tca_fill_side,
+                                .venue = "DEMO",
+                            };
+                            tp.fill_count += 1;
+                            break;
+                        }
+                    }
                 }
             }
 
             if (algo.twap.isComplete()) {
                 algo.active = false;
+                // Trigger TCA completion
+                for (0..self.tca_pending_count) |tp_idx| {
+                    if (self.tca_pending[tp_idx].active and self.tca_pending[tp_idx].algo_idx == i) {
+                        self.completeTca(tp_idx);
+                        break;
+                    }
+                }
             }
         }
     }

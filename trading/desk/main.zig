@@ -194,6 +194,8 @@ pub fn main() !void {
                 .shutdown_ack => {
                     engine_stopped = true;
                 },
+                .tca_report => {},   // no-op: TCA report acknowledged but not displayed
+                .eod_report => {},   // no-op: EOD report acknowledged but not displayed
             }
         }
         if (!got_event) {

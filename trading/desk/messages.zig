@@ -63,6 +63,22 @@ pub const StatusUpdate = struct {
     connected: bool,
     strategy_state: [64]u8,
     strategy_state_len: u8,
+    vpin_scores: [8]i64,
+    vpin_valid: [8]bool,
+};
+
+pub const TcaReportEvent = struct {
+    instrument: InstrumentId,
+    is_cost_bps: i64,       // scaled by 100
+    fill_rate_pct: u8,      // 0-100
+    market_impact_bps: i64, // scaled by 100
+};
+
+pub const EodReportEvent = struct {
+    realized_pnl: i64,
+    unrealized_pnl: i64,
+    total_pnl: i64,
+    tick: u64,
 };
 
 pub const CandleUpdate = struct {
@@ -83,6 +99,8 @@ pub const EngineEvent = union(enum) {
     status: StatusUpdate,
     candle_update: CandleUpdate,
     shutdown_ack: void,
+    tca_report: TcaReportEvent,
+    eod_report: EodReportEvent,
 };
 
 pub const UserCommand = union(enum) {
