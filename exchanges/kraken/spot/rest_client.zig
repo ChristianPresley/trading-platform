@@ -138,17 +138,17 @@ pub const SpotRestClient = struct {
 
         // Collect pair names from the result object keys
         const k = result.object.keys();
-        var pair_list = std.ArrayList([]const u8).init(self.allocator);
+        var pair_list: std.ArrayList([]const u8) = .{};
         errdefer {
             for (pair_list.items) |p| self.allocator.free(p);
-            pair_list.deinit();
+            pair_list.deinit(self.allocator);
         }
         for (k) |key| {
-            try pair_list.append(try self.allocator.dupe(u8, key));
+            try pair_list.append(self.allocator, try self.allocator.dupe(u8, key));
         }
         return types.AssetPairsResult{
             .allocator = self.allocator,
-            .pairs = try pair_list.toOwnedSlice(),
+            .pairs = try pair_list.toOwnedSlice(self.allocator),
         };
     }
 
@@ -457,21 +457,21 @@ pub const SpotRestClient = struct {
         const descr_val = result.object.get("descr") orelse return error.MissingField;
         const order_descr = descr_val.object.get("order") orelse return error.MissingField;
 
-        var txids_list = std.ArrayList([]const u8).init(self.allocator);
+        var txids_list: std.ArrayList([]const u8) = .{};
         errdefer {
             for (txids_list.items) |t| self.allocator.free(t);
-            txids_list.deinit();
+            txids_list.deinit(self.allocator);
         }
         if (result.object.get("txid")) |txid_val| {
             for (txid_val.array) |t| {
-                try txids_list.append(try self.allocator.dupe(u8, t.string));
+                try txids_list.append(self.allocator, try self.allocator.dupe(u8, t.string));
             }
         }
 
         return types.AddOrderResult{
             .allocator = self.allocator,
             .descr = try self.allocator.dupe(u8, order_descr.string),
-            .txids = try txids_list.toOwnedSlice(),
+            .txids = try txids_list.toOwnedSlice(self.allocator),
         };
     }
 

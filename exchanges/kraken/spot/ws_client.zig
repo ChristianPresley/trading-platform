@@ -94,8 +94,8 @@ pub fn buildSubscribeMessage(
     pairs: []const []const u8,
     token: ?[]const u8,
 ) ![]u8 {
-    var buf = std.ArrayList(u8).init(allocator);
-    const w = buf.writer();
+    var buf: std.ArrayList(u8) = .{};
+    const w = buf.writer(allocator);
 
     try w.writeAll("{\"method\":\"subscribe\",\"params\":{\"channel\":\"");
     try w.writeAll(channel.name());
@@ -114,7 +114,7 @@ pub fn buildSubscribeMessage(
     }
     try w.writeAll("}}");
 
-    return buf.toOwnedSlice();
+    return buf.toOwnedSlice(allocator);
 }
 
 /// Build a Kraken WS v2 unsubscribe JSON message.
@@ -124,8 +124,8 @@ pub fn buildUnsubscribeMessage(
     channel: Channel,
     pairs: []const []const u8,
 ) ![]u8 {
-    var buf = std.ArrayList(u8).init(allocator);
-    const w = buf.writer();
+    var buf: std.ArrayList(u8) = .{};
+    const w = buf.writer(allocator);
 
     try w.writeAll("{\"method\":\"unsubscribe\",\"params\":{\"channel\":\"");
     try w.writeAll(channel.name());
@@ -138,7 +138,7 @@ pub fn buildUnsubscribeMessage(
     }
     try w.writeAll("]}}");
 
-    return buf.toOwnedSlice();
+    return buf.toOwnedSlice(allocator);
 }
 
 /// Parse a Kraken WS v2 message from a raw JSON string.

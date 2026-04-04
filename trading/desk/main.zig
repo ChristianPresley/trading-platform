@@ -438,7 +438,6 @@ fn processAction(
                 _ = order_entry.handleAction(action);
             }
         },
-        else => {},
     }
     return false;
 }

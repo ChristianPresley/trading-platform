@@ -47,12 +47,12 @@ pub const EodProcessor = struct {
     pub fn init(allocator: std.mem.Allocator) !EodProcessor {
         return EodProcessor{
             .allocator = allocator,
-            .snapshots = std.ArrayList(PositionSnapshot).init(allocator),
+            .snapshots = .{},
         };
     }
 
     pub fn deinit(self: *EodProcessor) void {
-        self.snapshots.deinit();
+        self.snapshots.deinit(self.allocator);
     }
 
     /// Snapshot all positions from a list of position views.
@@ -62,7 +62,7 @@ pub const EodProcessor = struct {
         const now_ms = @as(u64, @intCast(@divTrunc(std.time.nanoTimestamp(), std.time.ns_per_ms)));
 
         for (positions) |pos| {
-            try self.snapshots.append(.{
+            try self.snapshots.append(self.allocator, .{
                 .instrument = pos.instrument,
                 .quantity = pos.quantity,
                 .avg_cost = pos.avg_cost,

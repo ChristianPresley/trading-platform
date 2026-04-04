@@ -6,8 +6,8 @@ const std = @import("std");
 /// Returns a newly allocated slice containing the decoded body.
 /// Caller must free the returned slice.
 pub fn decode(allocator: std.mem.Allocator, data: []const u8) ![]const u8 {
-    var result = std.ArrayList(u8).init(allocator);
-    errdefer result.deinit();
+    var result: std.ArrayList(u8) = .{};
+    errdefer result.deinit(allocator);
 
     var pos: usize = 0;
     while (pos < data.len) {
@@ -26,7 +26,7 @@ pub fn decode(allocator: std.mem.Allocator, data: []const u8) ![]const u8 {
 
         // Read chunk data
         if (pos + chunk_size > data.len) return error.TruncatedChunk;
-        try result.appendSlice(data[pos .. pos + chunk_size]);
+        try result.appendSlice(allocator, data[pos .. pos + chunk_size]);
         pos += chunk_size;
 
         // Skip trailing \r\n after chunk data
@@ -34,7 +34,7 @@ pub fn decode(allocator: std.mem.Allocator, data: []const u8) ![]const u8 {
         if (pos < data.len and data[pos] == '\n') pos += 1;
     }
 
-    return result.toOwnedSlice();
+    return result.toOwnedSlice(allocator);
 }
 
 const LineEnd = struct {
@@ -65,8 +65,8 @@ fn findLineEnd(data: []const u8, start: usize) ?LineEnd {
 /// Decode chunked data from a generic reader (reads until 0-length chunk).
 /// Returns allocated slice with decoded body.
 pub fn decodeFromReader(allocator: std.mem.Allocator, reader: anytype) ![]const u8 {
-    var result = std.ArrayList(u8).init(allocator);
-    errdefer result.deinit();
+    var result: std.ArrayList(u8) = .{};
+    errdefer result.deinit(allocator);
 
     var line_buf: [128]u8 = undefined;
 
@@ -91,7 +91,7 @@ pub fn decodeFromReader(allocator: std.mem.Allocator, reader: anytype) ![]const 
 
         // Read chunk data
         const old_len = result.items.len;
-        try result.resize(old_len + chunk_size);
+        try result.resize(allocator, old_len + chunk_size);
         var read_so_far: usize = 0;
         while (read_so_far < chunk_size) {
             const n = reader.read(result.items[old_len + read_so_far ..]) catch return error.ConnectionClosed;
@@ -104,5 +104,5 @@ pub fn decodeFromReader(allocator: std.mem.Allocator, reader: anytype) ![]const 
         _ = reader.readByte() catch {}; // \n
     }
 
-    return result.toOwnedSlice();
+    return result.toOwnedSlice(allocator);
 }

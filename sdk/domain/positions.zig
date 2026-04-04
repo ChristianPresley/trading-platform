@@ -66,20 +66,20 @@ pub const PositionManager = struct {
             .allocator = allocator,
             .config = config,
             .positions = std.StringHashMap(Position).init(allocator),
-            .key_buf = std.ArrayList([]u8).init(allocator),
+            .key_buf = .{},
         };
     }
 
     pub fn deinit(self: *PositionManager) void {
         var it = self.positions.iterator();
         while (it.next()) |entry| {
-            entry.value_ptr.lots.deinit();
+            entry.value_ptr.lots.deinit(self.allocator);
         }
         self.positions.deinit();
         for (self.key_buf.items) |kb| {
             self.allocator.free(kb);
         }
-        self.key_buf.deinit();
+        self.key_buf.deinit(self.allocator);
     }
 
     /// Process a fill event, updating position quantity, lots, and realized P&L.
@@ -99,7 +99,7 @@ pub const PositionManager = struct {
                 .quantity = 0,
                 .avg_cost = 0,
                 .realized_pnl = 0,
-                .lots = std.ArrayList(Lot).init(self.allocator),
+                .lots = .{},
             };
         }
         const pos = gop.value_ptr;
@@ -116,7 +116,7 @@ pub const PositionManager = struct {
 
         if (opening) {
             // Opening or adding to position: add lot
-            try pos.lots.append(.{
+            try pos.lots.append(self.allocator, .{
                 .quantity = fill_qty,
                 .price = fill.price,
                 .timestamp = fill.timestamp,
@@ -168,7 +168,7 @@ pub const PositionManager = struct {
                 // If position crossed zero, open new lot in opposite direction
                 const overshoot = fill_qty - actual_close;
                 if (overshoot > 0) {
-                    try pos.lots.append(.{
+                    try pos.lots.append(self.allocator, .{
                         .quantity = overshoot,
                         .price = fill.price,
                         .timestamp = fill.timestamp,
@@ -213,7 +213,7 @@ pub const PositionManager = struct {
 
                 // If position crossed zero (remaining qty), open new lot in opposite direction
                 if (remaining > 0) {
-                    try pos.lots.append(.{
+                    try pos.lots.append(self.allocator, .{
                         .quantity = remaining,
                         .price = fill.price,
                         .timestamp = fill.timestamp,
@@ -297,7 +297,7 @@ pub const PositionManager = struct {
             "{s}|{s}|{d}|{s}",
             .{ key.account, key.instrument, key.settlement_date, key.currency },
         );
-        try self.key_buf.append(s);
+        try self.key_buf.append(self.allocator, s);
         return s;
     }
 

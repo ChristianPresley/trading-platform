@@ -54,7 +54,7 @@ pub const ParquetWriter = struct {
             .file = file,
             .schema = schema,
             .total_rows = 0,
-            .row_group_meta = std.ArrayList(u8).init(allocator),
+            .row_group_meta = .{},
         };
     }
 
@@ -80,37 +80,37 @@ pub const ParquetWriter = struct {
         var rg_entry: [8]u8 = undefined;
         std.mem.writeInt(u32, rg_entry[0..4], @as(u32, @intCast(columns.len)), .little);
         std.mem.writeInt(u32, rg_entry[4..8], @as(u32, @intCast(self.total_rows & 0xFFFFFFFF)), .little);
-        try self.row_group_meta.appendSlice(&rg_entry);
+        try self.row_group_meta.appendSlice(self.allocator, &rg_entry);
     }
 
     /// Close the file: write footer with schema + row group metadata, then PAR1 magic.
     pub fn close(self: *ParquetWriter) !void {
         defer {
-            self.row_group_meta.deinit();
+            self.row_group_meta.deinit(self.allocator);
             self.file.close();
         }
 
         // Write footer: schema info (simplified) + row group metadata
-        var footer = std.ArrayList(u8).init(self.allocator);
-        defer footer.deinit();
+        var footer: std.ArrayList(u8) = .{};
+        defer footer.deinit(self.allocator);
 
         // Write number of schema columns (4 bytes LE)
         var col_count: [4]u8 = undefined;
         std.mem.writeInt(u32, &col_count, @as(u32, @intCast(self.schema.columns.len)), .little);
-        try footer.appendSlice(&col_count);
+        try footer.appendSlice(self.allocator, &col_count);
 
         // Write each column definition (name_len: 2B + name + type: 1B + repetition: 1B)
         for (self.schema.columns) |col| {
             var name_len: [2]u8 = undefined;
             std.mem.writeInt(u16, &name_len, @as(u16, @intCast(col.name.len)), .little);
-            try footer.appendSlice(&name_len);
-            try footer.appendSlice(col.name);
-            try footer.append(@intFromEnum(col.type));
-            try footer.append(@intFromEnum(col.repetition));
+            try footer.appendSlice(self.allocator, &name_len);
+            try footer.appendSlice(self.allocator, col.name);
+            try footer.append(self.allocator, @intFromEnum(col.type));
+            try footer.append(self.allocator, @intFromEnum(col.repetition));
         }
 
         // Write row group metadata
-        try footer.appendSlice(self.row_group_meta.items);
+        try footer.appendSlice(self.allocator, self.row_group_meta.items);
 
         const footer_bytes = footer.items;
         const footer_len = @as(u32, @intCast(footer_bytes.len));

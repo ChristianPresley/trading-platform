@@ -88,7 +88,7 @@ pub const WebSocketClient = struct {
             .recv_buf = recv_buf,
             .recv_len = 0,
             .send_buf = send_buf,
-            .frag_payload = std.ArrayList(u8).init(allocator),
+            .frag_payload = .{},
             .frag_opcode = .text,
             .in_fragment = false,
         };
@@ -221,7 +221,7 @@ pub const WebSocketClient = struct {
                         },
                         .continuation => {
                             // Fragmented message continuation
-                            try self.frag_payload.appendSlice(frm.payload);
+                            try self.frag_payload.appendSlice(self.allocator, frm.payload);
                             if (frm.fin) {
                                 const op = self.frag_opcode;
                                 self.in_fragment = false;
@@ -236,7 +236,7 @@ pub const WebSocketClient = struct {
                             if (!frm.fin) {
                                 // Start of fragmented message
                                 self.frag_payload.clearRetainingCapacity();
-                                try self.frag_payload.appendSlice(frm.payload);
+                                try self.frag_payload.appendSlice(self.allocator, frm.payload);
                                 self.frag_opcode = frm.opcode;
                                 self.in_fragment = true;
                                 continue;
@@ -281,6 +281,6 @@ pub const WebSocketClient = struct {
         self.allocator.free(self.recv_buf);
         self.allocator.free(self.send_buf);
         self.allocator.free(self.url);
-        self.frag_payload.deinit();
+        self.frag_payload.deinit(self.allocator);
     }
 };

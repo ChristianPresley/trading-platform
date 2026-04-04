@@ -121,12 +121,12 @@ test "EventStore: replay from arbitrary sequence" {
 
     // Replay from seq 3 — should get events 3, 4, 5
     var iter = store.replay(3);
-    var seqs = std.ArrayList(u64).init(std.testing.allocator);
-    defer seqs.deinit();
+    var seqs: std.ArrayList(u64) = .{};
+    defer seqs.deinit(std.testing.allocator);
 
     while (iter.next()) |evt| {
         defer std.testing.allocator.free(evt.data);
-        try seqs.append(evt.sequence);
+        try seqs.append(std.testing.allocator, evt.sequence);
     }
 
     try std.testing.expectEqual(@as(usize, 3), seqs.items.len);

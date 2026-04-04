@@ -27,7 +27,7 @@ pub const StressTest = struct {
     pub fn init(allocator: std.mem.Allocator) !StressTest {
         return StressTest{
             .allocator = allocator,
-            .scenarios = std.ArrayList(Scenario).init(allocator),
+            .scenarios = .{},
         };
     }
 
@@ -35,13 +35,13 @@ pub const StressTest = struct {
         for (self.scenarios.items) |s| {
             self.allocator.free(s.shocks);
         }
-        self.scenarios.deinit();
+        self.scenarios.deinit(self.allocator);
     }
 
     /// Add a named stress scenario with a set of price shocks.
     pub fn addScenario(self: *StressTest, name: []const u8, shocks: []const Shock) !void {
         const owned_shocks = try self.allocator.dupe(Shock, shocks);
-        try self.scenarios.append(.{
+        try self.scenarios.append(self.allocator, .{
             .name = name,
             .shocks = owned_shocks,
         });

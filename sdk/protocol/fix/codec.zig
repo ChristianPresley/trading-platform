@@ -19,7 +19,7 @@ pub const FixMessage = struct {
     pub fn init(allocator: std.mem.Allocator) FixMessage {
         return .{
             .allocator = allocator,
-            .entries = std.ArrayList(TagEntry).init(allocator),
+            .entries = .{},
         };
     }
 
@@ -28,7 +28,7 @@ pub const FixMessage = struct {
         for (self.entries.items) |entry| {
             self.allocator.free(entry.value);
         }
-        self.entries.deinit();
+        self.entries.deinit(self.allocator);
     }
 
     /// Stores a tag=value pair. Duplicates tags are allowed (last write wins on get).
@@ -43,7 +43,7 @@ pub const FixMessage = struct {
         }
         // New tag
         const duped = try self.allocator.dupe(u8, value);
-        try self.entries.append(.{ .tag = tag, .value = duped });
+        try self.entries.append(self.allocator, .{ .tag = tag, .value = duped });
     }
 
     /// Retrieves the value for a tag, or null if not present.

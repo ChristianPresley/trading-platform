@@ -243,11 +243,11 @@ test "error: nesting too deep" {
     var parser = json.JsonParser.init(std.testing.allocator);
     defer parser.deinit();
     // Build 101 levels of nesting
-    var deep = std.ArrayList(u8).init(std.testing.allocator);
-    defer deep.deinit();
-    for (0..101) |_| try deep.append('[');
-    try deep.append('1');
-    for (0..101) |_| try deep.append(']');
+    var deep: std.ArrayList(u8) = .{};
+    defer deep.deinit(std.testing.allocator);
+    for (0..101) |_| try deep.append(std.testing.allocator, '[');
+    try deep.append(std.testing.allocator, '1');
+    for (0..101) |_| try deep.append(std.testing.allocator, ']');
     const result = parser.parse(deep.items);
     try std.testing.expectError(error.NestingTooDeep, result);
 }

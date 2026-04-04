@@ -329,16 +329,16 @@ pub fn parse(allocator: std.mem.Allocator, der: []const u8) !Certificate {
                         const san_seq_content = san_p.readTlv(TAG_SEQUENCE) catch continue;
                         var san_seq = DerParser.init(san_seq_content);
 
-                        var dns_list = std.ArrayList([]const u8).init(allocator);
+                        var dns_list: std.ArrayList([]const u8) = .{};
                         while (san_seq.remaining() > 0) {
                             const gn = san_seq.readTlvAnyTag() catch break;
                             // dNSName [2] IMPLICIT IA5String
                             if (gn.tag == 0x82) {
-                                try dns_list.append(gn.value);
+                                try dns_list.append(allocator, gn.value);
                             }
                         }
                         subject_alt_names = SubjectAltName{
-                            .dns_names = try dns_list.toOwnedSlice(),
+                            .dns_names = try dns_list.toOwnedSlice(allocator),
                         };
                     }
                 }

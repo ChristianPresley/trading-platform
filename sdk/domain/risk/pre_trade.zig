@@ -61,16 +61,16 @@ pub const PreTradeRisk = struct {
             .allocator = allocator,
             .config = config,
             .positions = std.StringHashMap(i64).init(allocator),
-            .rate_window = std.ArrayList(u64).init(allocator),
-            .dedup_entries = std.ArrayList(DedupEntry).init(allocator),
+            .rate_window = .{},
+            .dedup_entries = .{},
             .ref_prices = std.StringHashMap(i64).init(allocator),
         };
     }
 
     pub fn deinit(self: *PreTradeRisk) void {
         self.positions.deinit();
-        self.rate_window.deinit();
-        self.dedup_entries.deinit();
+        self.rate_window.deinit(self.allocator);
+        self.dedup_entries.deinit(self.allocator);
         self.ref_prices.deinit();
     }
 
@@ -130,7 +130,7 @@ pub const PreTradeRisk = struct {
         if (count >= self.config.max_order_rate) return .{ .rejected = .rate_exceeded };
 
         // Record this order in the rate window
-        self.rate_window.append(now_ns) catch {};
+        self.rate_window.append(self.allocator, now_ns) catch {};
 
         // 6. Duplicate detection (skipped when dedup_window_ms == 0)
         if (self.config.dedup_window_ms > 0) {
@@ -157,7 +157,7 @@ pub const PreTradeRisk = struct {
             }
 
             // Record this order for future duplicate checks
-            self.dedup_entries.append(.{
+            self.dedup_entries.append(self.allocator, .{
                 .key = dedup_key,
                 .timestamp_ms = now_ms,
             }) catch {};
@@ -167,9 +167,8 @@ pub const PreTradeRisk = struct {
     }
 
     fn nowNanos() u64 {
-        var ts: std.posix.timespec = undefined;
-        std.posix.clock_gettime(std.posix.CLOCK.MONOTONIC, &ts) catch return 0;
-        return @as(u64, @intCast(ts.tv_sec)) * 1_000_000_000 + @as(u64, @intCast(ts.tv_nsec));
+        const ts = std.posix.clock_gettime(std.posix.CLOCK.MONOTONIC) catch return 0;
+        return @as(u64, @intCast(ts.sec)) * 1_000_000_000 + @as(u64, @intCast(ts.nsec));
     }
 
     fn hashStr(s: []const u8) u64 {

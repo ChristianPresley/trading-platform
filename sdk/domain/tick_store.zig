@@ -271,8 +271,8 @@ pub const TickStore = struct {
         const to_date = dateTagFromNs(to);
 
         // Collect all data from relevant partitions
-        var all_data = std.ArrayList(u8).init(self.allocator);
-        errdefer all_data.deinit();
+        var all_data: std.ArrayList(u8) = .{};
+        errdefer all_data.deinit(self.allocator);
 
         var current_date = from_date;
         while (current_date <= to_date) {
@@ -291,14 +291,14 @@ pub const TickStore = struct {
             const file_size = (try file.stat()).size;
             if (file_size > 0) {
                 const start = all_data.items.len;
-                try all_data.resize(start + file_size);
+                try all_data.resize(self.allocator, start + file_size);
                 _ = try file.readAll(all_data.items[start..]);
             }
 
             current_date = nextDate(current_date);
         }
 
-        const data = try all_data.toOwnedSlice();
+        const data = try all_data.toOwnedSlice(self.allocator);
 
         return TickIterator{
             .allocator = self.allocator,

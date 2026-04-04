@@ -19,7 +19,7 @@ pub const PoolAllocator = struct {
         // Ensure slot_size is at least large enough for a FreeNode pointer and aligned
         const effective_slot_size = @max(slot_size, @sizeOf(FreeNode));
         const aligned_slot_size = std.mem.alignForward(usize, effective_slot_size, cache_line_size);
-        const slab = try backing.alignedAlloc(u8, cache_line_size, aligned_slot_size * slot_count);
+        const slab = try backing.alignedAlloc(u8, std.mem.Alignment.fromByteUnits(cache_line_size), aligned_slot_size * slot_count);
 
         var pool = PoolAllocator{
             .backing = backing,
@@ -53,27 +53,27 @@ pub const PoolAllocator = struct {
         };
     }
 
-    fn alloc(ctx: *anyopaque, n: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
+    fn alloc(ctx: *anyopaque, n: usize, alignment: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
         _ = ret_addr;
         const self: *PoolAllocator = @ptrCast(@alignCast(ctx));
-        const alignment: usize = @as(usize, 1) << @intCast(log2_align);
-        if (n > self.slot_size or alignment > cache_line_size) return null;
+        const align_bytes = alignment.toByteUnits();
+        if (n > self.slot_size or align_bytes > cache_line_size) return null;
         const node = self.free_list orelse return null;
         self.free_list = node.next;
         self.allocated += 1;
         return @ptrCast(node);
     }
 
-    fn resize(ctx: *anyopaque, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
-        _ = log2_align;
+    fn resize(ctx: *anyopaque, buf: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {
+        _ = alignment;
         _ = ret_addr;
         _ = buf;
         const self: *PoolAllocator = @ptrCast(@alignCast(ctx));
         return new_len <= self.slot_size;
     }
 
-    fn free(ctx: *anyopaque, buf: []u8, log2_align: u8, ret_addr: usize) void {
-        _ = log2_align;
+    fn free(ctx: *anyopaque, buf: []u8, alignment: std.mem.Alignment, ret_addr: usize) void {
+        _ = alignment;
         _ = ret_addr;
         const self: *PoolAllocator = @ptrCast(@alignCast(ctx));
         const node: *FreeNode = @ptrCast(@alignCast(buf.ptr));
@@ -82,9 +82,14 @@ pub const PoolAllocator = struct {
         self.allocated -= 1;
     }
 
+    fn remap(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize, _: usize) ?[*]u8 {
+        return null;
+    }
+
     const vtable = std.mem.Allocator.VTable{
         .alloc = alloc,
         .resize = resize,
+        .remap = remap,
         .free = free,
     };
 };

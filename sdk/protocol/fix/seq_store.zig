@@ -16,7 +16,7 @@ pub const SeqStore = struct {
     pub fn init(allocator: std.mem.Allocator) !SeqStore {
         return .{
             .allocator = allocator,
-            .entries = std.ArrayList(SeqEntry).init(allocator),
+            .entries = .{},
         };
     }
 
@@ -32,7 +32,7 @@ pub const SeqStore = struct {
             }
         }
         const duped = try self.allocator.dupe(u8, msg);
-        try self.entries.append(.{ .seq_num = seq_num, .msg = duped });
+        try self.entries.append(self.allocator, .{ .seq_num = seq_num, .msg = duped });
     }
 
     /// Retrieves the message for a sequence number, or null if not found.
@@ -57,6 +57,6 @@ pub const SeqStore = struct {
         for (self.entries.items) |entry| {
             self.allocator.free(entry.msg);
         }
-        self.entries.deinit();
+        self.entries.deinit(self.allocator);
     }
 };

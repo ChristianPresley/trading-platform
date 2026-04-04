@@ -62,9 +62,8 @@ fn readU128Le(buf: []const u8) u128 {
 }
 
 fn nowNanos() u128 {
-    var ts: std.posix.timespec = undefined;
-    std.posix.clock_gettime(std.posix.CLOCK.REALTIME, &ts) catch return 0;
-    return @as(u128, @intCast(ts.tv_sec)) * 1_000_000_000 + @as(u128, @intCast(ts.tv_nsec));
+    const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch return 0;
+    return @as(u128, @intCast(ts.sec)) * 1_000_000_000 + @as(u128, @intCast(ts.nsec));
 }
 
 // ---

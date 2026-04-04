@@ -51,17 +51,17 @@ pub fn parseResponse(allocator: std.mem.Allocator, data: []const u8) !Response {
     const status_code = std.fmt.parseInt(u16, code_str, 10) catch return error.InvalidStatusCode;
 
     // Parse headers
-    var headers_list = std.ArrayList(Header).init(allocator);
+    var headers_list: std.ArrayList(Header) = .{};
     errdefer {
         for (headers_list.items) |h| {
             allocator.free(h.name);
             allocator.free(h.value);
         }
-        headers_list.deinit();
+        headers_list.deinit(allocator);
     }
 
     const header_nl = if (std.mem.indexOf(u8, header_section, "\r\n") != null) "\r\n" else "\n";
-    var line_iter = std.mem.split(u8, header_section[first_line_end + header_nl.len ..], header_nl);
+    var line_iter = std.mem.splitSequence(u8, header_section[first_line_end + header_nl.len ..], header_nl);
     var content_length: ?usize = null;
     var is_chunked = false;
 
@@ -87,7 +87,7 @@ pub fn parseResponse(allocator: std.mem.Allocator, data: []const u8) !Response {
             is_chunked = true;
         }
 
-        try headers_list.append(.{ .name = name_dup, .value = value_dup });
+        try headers_list.append(allocator, .{ .name = name_dup, .value = value_dup });
     }
 
     // Extract body
@@ -105,7 +105,7 @@ pub fn parseResponse(allocator: std.mem.Allocator, data: []const u8) !Response {
     return Response{
         .allocator = allocator,
         .status = status_code,
-        .headers = try headers_list.toOwnedSlice(),
+        .headers = try headers_list.toOwnedSlice(allocator),
         .body = body,
     };
 }
@@ -185,7 +185,7 @@ pub const HttpClient = struct {
     pub fn init(allocator: std.mem.Allocator) !HttpClient {
         return HttpClient{
             .allocator = allocator,
-            .connections = std.ArrayList(PooledConnection).init(allocator),
+            .connections = .{},
             .max_pool_size = 16,
             .request_buf = undefined,
             .response_buf = undefined,
@@ -212,7 +212,7 @@ pub const HttpClient = struct {
         try std.posix.connect(sock, &addr.any, addr.getOsSockLen());
 
         const host_dup = try self.allocator.dupe(u8, host);
-        try self.connections.append(.{
+        try self.connections.append(self.allocator, .{
             .host = host_dup,
             .port = port,
             .socket = sock,
@@ -284,6 +284,6 @@ pub const HttpClient = struct {
             std.posix.close(conn.socket);
             self.allocator.free(conn.host);
         }
-        self.connections.deinit();
+        self.connections.deinit(self.allocator);
     }
 };

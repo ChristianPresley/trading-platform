@@ -69,8 +69,8 @@ pub const ReconEngine = struct {
     /// Match trades by ID first, then by (instrument, side, qty, time window).
     /// Flags mismatches as breaks with typed reasons.
     pub fn reconcileTrades(self: *ReconEngine, internal: []const Trade, external: []const Trade) !ReconResult {
-        var breaks = std.ArrayList(Break).init(self.allocator);
-        errdefer breaks.deinit();
+        var breaks: std.ArrayList(Break) = .{};
+        errdefer breaks.deinit(self.allocator);
 
         // Track which external trades have been matched
         var ext_matched = try self.allocator.alloc(bool, external.len);
@@ -126,14 +126,14 @@ pub const ReconEngine = struct {
                 const price_tol_violated = (price_diff_f / ext_price_f) > self.tolerance.price_tolerance;
 
                 if (qty_diff > self.tolerance.qty_tolerance) {
-                    try breaks.append(.{
+                    try breaks.append(self.allocator, .{
                         .break_type = .quantity_mismatch,
                         .internal = int_trade,
                         .external = ext_trade,
                         .description = "quantity mismatch beyond tolerance",
                     });
                 } else if (price_tol_violated) {
-                    try breaks.append(.{
+                    try breaks.append(self.allocator, .{
                         .break_type = .price_mismatch,
                         .internal = int_trade,
                         .external = ext_trade,
@@ -152,7 +152,7 @@ pub const ReconEngine = struct {
                 }
             } else {
                 unmatched_internal += 1;
-                try breaks.append(.{
+                try breaks.append(self.allocator, .{
                     .break_type = .missing_external,
                     .internal = int_trade,
                     .external = null,
@@ -166,7 +166,7 @@ pub const ReconEngine = struct {
         for (external, 0..) |ext_trade, i| {
             if (!ext_matched[i]) {
                 unmatched_external += 1;
-                try breaks.append(.{
+                try breaks.append(self.allocator, .{
                     .break_type = .missing_internal,
                     .internal = null,
                     .external = ext_trade,
@@ -177,7 +177,7 @@ pub const ReconEngine = struct {
 
         return ReconResult{
             .matched = matched,
-            .breaks = try breaks.toOwnedSlice(),
+            .breaks = try breaks.toOwnedSlice(self.allocator),
             .unmatched_internal = unmatched_internal,
             .unmatched_external = unmatched_external,
         };
@@ -185,8 +185,8 @@ pub const ReconEngine = struct {
 
     /// Compare position quantities and values within tolerance.
     pub fn reconcilePositions(self: *ReconEngine, internal: []const Position, external: []const Position) !ReconResult {
-        var breaks = std.ArrayList(Break).init(self.allocator);
-        errdefer breaks.deinit();
+        var breaks: std.ArrayList(Break) = .{};
+        errdefer breaks.deinit(self.allocator);
 
         var ext_matched = try self.allocator.alloc(bool, external.len);
         defer self.allocator.free(ext_matched);
@@ -228,7 +228,7 @@ pub const ReconEngine = struct {
                         .price = ext_pos.value,
                         .timestamp_ms = 0,
                     };
-                    try breaks.append(.{
+                    try breaks.append(self.allocator, .{
                         .break_type = .quantity_mismatch,
                         .internal = int_trade,
                         .external = ext_trade,
@@ -239,7 +239,7 @@ pub const ReconEngine = struct {
                 }
             } else {
                 unmatched_internal += 1;
-                try breaks.append(.{
+                try breaks.append(self.allocator, .{
                     .break_type = .missing_external,
                     .internal = Trade{
                         .id = int_pos.instrument,
@@ -259,7 +259,7 @@ pub const ReconEngine = struct {
         for (external, 0..) |ext_pos, i| {
             if (!ext_matched[i]) {
                 unmatched_external += 1;
-                try breaks.append(.{
+                try breaks.append(self.allocator, .{
                     .break_type = .missing_internal,
                     .internal = null,
                     .external = Trade{
@@ -277,7 +277,7 @@ pub const ReconEngine = struct {
 
         return ReconResult{
             .matched = matched,
-            .breaks = try breaks.toOwnedSlice(),
+            .breaks = try breaks.toOwnedSlice(self.allocator),
             .unmatched_internal = unmatched_internal,
             .unmatched_external = unmatched_external,
         };
@@ -285,8 +285,8 @@ pub const ReconEngine = struct {
 
     /// Reconcile cash balances by currency.
     pub fn reconcileCash(self: *ReconEngine, internal: []const CashBalance, external: []const CashBalance) !ReconResult {
-        var breaks = std.ArrayList(Break).init(self.allocator);
-        errdefer breaks.deinit();
+        var breaks: std.ArrayList(Break) = .{};
+        errdefer breaks.deinit(self.allocator);
 
         var ext_matched = try self.allocator.alloc(bool, external.len);
         defer self.allocator.free(ext_matched);
@@ -329,7 +329,7 @@ pub const ReconEngine = struct {
                         .price = ext_cash.amount,
                         .timestamp_ms = 0,
                     };
-                    try breaks.append(.{
+                    try breaks.append(self.allocator, .{
                         .break_type = .price_mismatch,
                         .internal = int_trade,
                         .external = ext_trade,
@@ -340,7 +340,7 @@ pub const ReconEngine = struct {
                 }
             } else {
                 unmatched_internal += 1;
-                try breaks.append(.{
+                try breaks.append(self.allocator, .{
                     .break_type = .missing_external,
                     .internal = Trade{
                         .id = int_cash.currency,
@@ -360,7 +360,7 @@ pub const ReconEngine = struct {
         for (external, 0..) |ext_cash, i| {
             if (!ext_matched[i]) {
                 unmatched_external += 1;
-                try breaks.append(.{
+                try breaks.append(self.allocator, .{
                     .break_type = .missing_internal,
                     .internal = null,
                     .external = Trade{
@@ -378,7 +378,7 @@ pub const ReconEngine = struct {
 
         return ReconResult{
             .matched = matched,
-            .breaks = try breaks.toOwnedSlice(),
+            .breaks = try breaks.toOwnedSlice(self.allocator),
             .unmatched_internal = unmatched_internal,
             .unmatched_external = unmatched_external,
         };

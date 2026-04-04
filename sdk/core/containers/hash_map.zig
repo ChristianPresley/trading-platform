@@ -85,8 +85,8 @@ pub fn FixedHashMap(comptime K: type, comptime V: type, comptime capacity: usize
 
         fn hash(key: K) usize {
             return switch (@typeInfo(K)) {
-                .Int, .ComptimeInt => @intCast(key),
-                .Pointer => |ptr| blk: {
+                .int, .comptime_int => @intCast(key),
+                .pointer => |ptr| blk: {
                     if (ptr.child == u8) {
                         // slice of u8 — hash as string
                         const s: []const u8 = key;
@@ -105,8 +105,8 @@ pub fn FixedHashMap(comptime K: type, comptime V: type, comptime capacity: usize
 
         fn eql(comptime KT: type, a: KT, b: KT) bool {
             return switch (@typeInfo(KT)) {
-                .Int, .ComptimeInt => a == b,
-                .Pointer => |ptr| blk: {
+                .int, .comptime_int => a == b,
+                .pointer => |ptr| blk: {
                     if (ptr.child == u8) {
                         const sa: []const u8 = a;
                         const sb: []const u8 = b;

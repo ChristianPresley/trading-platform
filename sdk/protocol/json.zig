@@ -107,8 +107,8 @@ const Tokenizer = struct {
 
     fn parseString(self: *Tokenizer, allocator: std.mem.Allocator) ParseError![]const u8 {
         try self.expect('"');
-        var result = std.ArrayList(u8).init(allocator);
-        errdefer result.deinit();
+        var result: std.ArrayList(u8) = .{};
+        errdefer result.deinit(allocator);
 
         while (true) {
             if (self.pos >= self.input.len) return error.UnterminatedString;
@@ -122,14 +122,14 @@ const Tokenizer = struct {
                 const esc = self.input[self.pos];
                 self.pos += 1;
                 switch (esc) {
-                    '"' => try result.append('"'),
-                    '\\' => try result.append('\\'),
-                    '/' => try result.append('/'),
-                    'b' => try result.append('\x08'),
-                    'f' => try result.append('\x0C'),
-                    'n' => try result.append('\n'),
-                    'r' => try result.append('\r'),
-                    't' => try result.append('\t'),
+                    '"' => try result.append(allocator, '"'),
+                    '\\' => try result.append(allocator, '\\'),
+                    '/' => try result.append(allocator, '/'),
+                    'b' => try result.append(allocator, '\x08'),
+                    'f' => try result.append(allocator, '\x0C'),
+                    'n' => try result.append(allocator, '\n'),
+                    'r' => try result.append(allocator, '\r'),
+                    't' => try result.append(allocator, '\t'),
                     'u' => {
                         if (self.pos + 4 > self.input.len) return error.InvalidUnicodeEscape;
                         const hex_str = self.input[self.pos .. self.pos + 4];
@@ -148,21 +148,21 @@ const Tokenizer = struct {
                             const full_cp: u21 = @intCast(0x10000 + (@as(u32, code_point - 0xD800) << 10) + (low - 0xDC00));
                             var utf8_buf: [4]u8 = undefined;
                             const n = std.unicode.utf8Encode(full_cp, &utf8_buf) catch return error.InvalidUnicodeEscape;
-                            try result.appendSlice(utf8_buf[0..n]);
+                            try result.appendSlice(allocator, utf8_buf[0..n]);
                         } else {
                             var utf8_buf: [4]u8 = undefined;
                             const n = std.unicode.utf8Encode(code_point, &utf8_buf) catch return error.InvalidUnicodeEscape;
-                            try result.appendSlice(utf8_buf[0..n]);
+                            try result.appendSlice(allocator, utf8_buf[0..n]);
                         }
                     },
                     else => return error.InvalidEscapeSequence,
                 }
             } else {
-                try result.append(c);
+                try result.append(allocator, c);
             }
         }
 
-        return result.toOwnedSlice();
+        return result.toOwnedSlice(allocator);
     }
 
     fn parseNumber(self: *Tokenizer) ParseError!Value {
@@ -297,20 +297,20 @@ pub const JsonParser = struct {
         tok.skipWhitespace();
         try tok.expect('{');
 
-        var keys_list = std.ArrayList([]const u8).init(self.allocator);
-        var vals_list = std.ArrayList(Value).init(self.allocator);
+        var keys_list: std.ArrayList([]const u8) = .{};
+        var vals_list: std.ArrayList(Value) = .{};
         errdefer {
             for (keys_list.items) |k| self.allocator.free(k);
             for (vals_list.items) |v| deinitValue(v, self.allocator);
-            keys_list.deinit();
-            vals_list.deinit();
+            keys_list.deinit(self.allocator);
+            vals_list.deinit(self.allocator);
         }
 
         tok.skipWhitespace();
         if (tok.peekReal() == '}') {
             _ = try tok.consume();
-            keys_list.deinit();
-            vals_list.deinit();
+            keys_list.deinit(self.allocator);
+            vals_list.deinit(self.allocator);
             return Value{ .object = ObjectMap.init() };
         }
 
@@ -322,7 +322,7 @@ pub const JsonParser = struct {
             const key = try tok.parseString(self.allocator);
             // Append key first; outer errdefer frees keys_list.items on error.
             // Use a separate errdefer for the key itself in case append fails.
-            keys_list.append(key) catch |e| {
+            keys_list.append(self.allocator, key) catch |e| {
                 self.allocator.free(key);
                 return e;
             };
@@ -331,7 +331,7 @@ pub const JsonParser = struct {
             try tok.expect(':');
 
             const value = try self.parseValue(tok, depth);
-            try vals_list.append(value);
+            try vals_list.append(self.allocator, value);
 
             tok.skipWhitespace();
             const next = tok.peekReal() orelse return error.UnexpectedEnd;
@@ -349,8 +349,8 @@ pub const JsonParser = struct {
         }
 
         const count = keys_list.items.len;
-        const k_slice = try keys_list.toOwnedSlice();
-        const v_slice = try vals_list.toOwnedSlice();
+        const k_slice = try keys_list.toOwnedSlice(self.allocator);
+        const v_slice = try vals_list.toOwnedSlice(self.allocator);
         return Value{ .object = ObjectMap{ .keys_ = k_slice, .values_ = v_slice, .len = count } };
     }
 
@@ -358,22 +358,22 @@ pub const JsonParser = struct {
         tok.skipWhitespace();
         try tok.expect('[');
 
-        var items = std.ArrayList(Value).init(self.allocator);
+        var items: std.ArrayList(Value) = .{};
         errdefer {
             for (items.items) |item| deinitValue(item, self.allocator);
-            items.deinit();
+            items.deinit(self.allocator);
         }
 
         tok.skipWhitespace();
         if (tok.peekReal() == ']') {
             _ = try tok.consume();
-            items.deinit();
+            items.deinit(self.allocator);
             return Value{ .array = &.{} };
         }
 
         while (true) {
             const value = try self.parseValue(tok, depth);
-            try items.append(value);
+            try items.append(self.allocator, value);
 
             tok.skipWhitespace();
             const next = tok.peekReal() orelse return error.UnexpectedEnd;
@@ -390,7 +390,7 @@ pub const JsonParser = struct {
             return error.ExpectedCommaOrBracket;
         }
 
-        return Value{ .array = try items.toOwnedSlice() };
+        return Value{ .array = try items.toOwnedSlice(self.allocator) };
     }
 
     pub fn deinit(self: *JsonParser) void {
@@ -399,8 +399,8 @@ pub const JsonParser = struct {
 };
 
 /// Internal stringify to ArrayList writer (avoids anytype recursion issue).
-fn stringifyToList(value: Value, list: *std.ArrayList(u8)) std.mem.Allocator.Error!void {
-    const writer = list.writer();
+fn stringifyToList(value: Value, list: *std.ArrayList(u8), allocator: std.mem.Allocator) std.mem.Allocator.Error!void {
+    const writer = list.writer(allocator);
     switch (value) {
         .null_value => try writer.writeAll("null"),
         .boolean => |b| try writer.writeAll(if (b) "true" else "false"),
@@ -435,7 +435,7 @@ fn stringifyToList(value: Value, list: *std.ArrayList(u8)) std.mem.Allocator.Err
             try writer.writeByte('[');
             for (arr, 0..) |item, i| {
                 if (i > 0) try writer.writeByte(',');
-                try stringifyToList(item, list);
+                try stringifyToList(item, list, allocator);
             }
             try writer.writeByte(']');
         },
@@ -457,7 +457,7 @@ fn stringifyToList(value: Value, list: *std.ArrayList(u8)) std.mem.Allocator.Err
                 }
                 try writer.writeByte('"');
                 try writer.writeByte(':');
-                try stringifyToList(obj.values_[i], list);
+                try stringifyToList(obj.values_[i], list, allocator);
             }
             try writer.writeByte('}');
         },
@@ -466,10 +466,10 @@ fn stringifyToList(value: Value, list: *std.ArrayList(u8)) std.mem.Allocator.Err
 
 /// Serialize a Value into a newly allocated string. Caller must free.
 pub fn stringifyAlloc(allocator: std.mem.Allocator, value: Value) ![]const u8 {
-    var list = std.ArrayList(u8).init(allocator);
-    errdefer list.deinit();
-    try stringifyToList(value, &list);
-    return list.toOwnedSlice();
+    var list: std.ArrayList(u8) = .{};
+    errdefer list.deinit(allocator);
+    try stringifyToList(value, &list, allocator);
+    return list.toOwnedSlice(allocator);
 }
 
 /// Serialize a Value into a fixed-size buffer. Returns the serialized slice.
@@ -479,8 +479,9 @@ pub fn stringify(value: Value, buf: []u8) ![]const u8 {
     // We need a temporary buffer for the ArrayList — use a stack buffer.
     var stack_buf: [65536]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&stack_buf);
-    var tmp = std.ArrayList(u8).init(fba.allocator());
-    try stringifyToList(value, &tmp);
+    const fba_alloc = fba.allocator();
+    var tmp: std.ArrayList(u8) = .{};
+    try stringifyToList(value, &tmp, fba_alloc);
     if (tmp.items.len > buf.len) return error.NoSpaceLeft;
     @memcpy(buf[0..tmp.items.len], tmp.items);
     return buf[0..tmp.items.len];

@@ -31,19 +31,19 @@ pub const EventLoop = struct {
         return EventLoop{
             .allocator = allocator,
             .ring = ring,
-            .sockets = std.ArrayList(SocketEntry).init(allocator),
-            .timers = std.ArrayList(TimerEntry).init(allocator),
+            .sockets = .{},
+            .timers = .{},
             .running = false,
             .read_buf = undefined,
         };
     }
 
     pub fn addSocket(self: *EventLoop, fd: std.posix.fd_t, handler: *const Handler) !void {
-        try self.sockets.append(.{ .fd = fd, .handler = handler });
+        try self.sockets.append(self.allocator, .{ .fd = fd, .handler = handler });
     }
 
     pub fn addTimer(self: *EventLoop, timeout_ms: u64, callback: *const fn () void) !void {
-        try self.timers.append(.{ .timeout_ms = timeout_ms, .callback = callback });
+        try self.timers.append(self.allocator, .{ .timeout_ms = timeout_ms, .callback = callback });
     }
 
     pub fn removeSocket(self: *EventLoop, fd: std.posix.fd_t) void {
@@ -100,8 +100,8 @@ pub const EventLoop = struct {
     }
 
     pub fn deinit(self: *EventLoop) void {
-        self.sockets.deinit();
-        self.timers.deinit();
+        self.sockets.deinit(self.allocator);
+        self.timers.deinit(self.allocator);
         self.ring.deinit();
     }
 };

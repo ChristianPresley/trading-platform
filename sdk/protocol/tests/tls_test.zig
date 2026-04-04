@@ -141,21 +141,21 @@ fn makeMinimalCertDer(allocator: std.mem.Allocator) ![]u8 {
     //
     // We build a very minimal one for structural testing.
 
-    var cert = std.ArrayList(u8).init(allocator);
-    errdefer cert.deinit();
+    var cert: std.ArrayList(u8) = .{};
+    errdefer cert.deinit(allocator);
 
     // Helper to write TLV
     const append_tlv = struct {
-        fn run(list: *std.ArrayList(u8), tag: u8, content: []const u8) !void {
-            try list.append(tag);
+        fn run(list: *std.ArrayList(u8), alloc: std.mem.Allocator, tag: u8, content: []const u8) !void {
+            try list.append(alloc, tag);
             if (content.len < 128) {
-                try list.append(@intCast(content.len));
+                try list.append(alloc, @intCast(content.len));
             } else {
-                try list.append(0x82);
-                try list.append(@intCast(content.len >> 8));
-                try list.append(@intCast(content.len & 0xFF));
+                try list.append(alloc, 0x82);
+                try list.append(alloc, @intCast(content.len >> 8));
+                try list.append(alloc, @intCast(content.len & 0xFF));
             }
-            try list.appendSlice(content);
+            try list.appendSlice(alloc, content);
         }
     }.run;
 
@@ -163,91 +163,91 @@ fn makeMinimalCertDer(allocator: std.mem.Allocator) ![]u8 {
     const cn_oid = [_]u8{ 0x06, 0x03, 0x55, 0x04, 0x03 };
     // commonName value as PrintableString
     const cn_value_bytes = "test.example.com";
-    var cn_attr_content = std.ArrayList(u8).init(allocator);
-    defer cn_attr_content.deinit();
-    try cn_attr_content.appendSlice(&cn_oid);
+    var cn_attr_content: std.ArrayList(u8) = .{};
+    defer cn_attr_content.deinit(allocator);
+    try cn_attr_content.appendSlice(allocator, &cn_oid);
     // PrintableString tag = 0x13
-    try cn_attr_content.append(0x13);
-    try cn_attr_content.append(@intCast(cn_value_bytes.len));
-    try cn_attr_content.appendSlice(cn_value_bytes);
+    try cn_attr_content.append(allocator, 0x13);
+    try cn_attr_content.append(allocator, @intCast(cn_value_bytes.len));
+    try cn_attr_content.appendSlice(allocator, cn_value_bytes);
 
     // Build RDN: SET { SEQUENCE { OID, value } }
-    var rdn_seq = std.ArrayList(u8).init(allocator);
-    defer rdn_seq.deinit();
-    try append_tlv(&rdn_seq, 0x30, cn_attr_content.items); // SEQUENCE
-    var rdn_set = std.ArrayList(u8).init(allocator);
-    defer rdn_set.deinit();
-    try append_tlv(&rdn_set, 0x31, rdn_seq.items); // SET
+    var rdn_seq: std.ArrayList(u8) = .{};
+    defer rdn_seq.deinit(allocator);
+    try append_tlv(&rdn_seq, allocator, 0x30, cn_attr_content.items); // SEQUENCE
+    var rdn_set: std.ArrayList(u8) = .{};
+    defer rdn_set.deinit(allocator);
+    try append_tlv(&rdn_set, allocator, 0x31, rdn_seq.items); // SET
 
     // Build tbsCertificate
-    var tbs = std.ArrayList(u8).init(allocator);
-    defer tbs.deinit();
+    var tbs: std.ArrayList(u8) = .{};
+    defer tbs.deinit(allocator);
 
     // serialNumber INTEGER = 1
     const serial = [_]u8{ 0x02, 0x01, 0x01 };
-    try tbs.appendSlice(&serial);
+    try tbs.appendSlice(allocator, &serial);
 
     // signature AlgorithmIdentifier: SEQUENCE { OID sha256WithRSAEncryption }
     // sha256WithRSAEncryption OID: 1.2.840.113549.1.1.11
     const sig_algo_oid = [_]u8{ 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0b, 0x05, 0x00 };
-    try append_tlv(&tbs, 0x30, &sig_algo_oid);
+    try append_tlv(&tbs, allocator, 0x30, &sig_algo_oid);
 
     // issuer (same as subject: just the CN RDN)
-    try tbs.appendSlice(rdn_set.items);
+    try tbs.appendSlice(allocator, rdn_set.items);
 
     // validity: UTCTime not-before=700101000000Z not-after=491231235959Z
-    var validity = std.ArrayList(u8).init(allocator);
-    defer validity.deinit();
+    var validity: std.ArrayList(u8) = .{};
+    defer validity.deinit(allocator);
     const not_before = "700101000000Z";
     const not_after = "491231235959Z";
-    try validity.append(0x17); // UTCTime
-    try validity.append(@intCast(not_before.len));
-    try validity.appendSlice(not_before);
-    try validity.append(0x17);
-    try validity.append(@intCast(not_after.len));
-    try validity.appendSlice(not_after);
-    try append_tlv(&tbs, 0x30, validity.items);
+    try validity.append(allocator, 0x17); // UTCTime
+    try validity.append(allocator, @intCast(not_before.len));
+    try validity.appendSlice(allocator, not_before);
+    try validity.append(allocator, 0x17);
+    try validity.append(allocator, @intCast(not_after.len));
+    try validity.appendSlice(allocator, not_after);
+    try append_tlv(&tbs, allocator, 0x30, validity.items);
 
     // subject (same as issuer)
-    try tbs.appendSlice(rdn_set.items);
+    try tbs.appendSlice(allocator, rdn_set.items);
 
     // subjectPublicKeyInfo: minimal RSA key
     const rsa_oid = [_]u8{ 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00 };
     // BIT STRING with a single 0x00 (unused bits) + minimal modulus/exponent
     const fake_key = [_]u8{ 0x00, 0x30, 0x0d, 0x02, 0x01, 0x01, 0x02, 0x03, 0x01, 0x00, 0x01 };
-    var spki = std.ArrayList(u8).init(allocator);
-    defer spki.deinit();
-    try append_tlv(&spki, 0x30, &rsa_oid);
-    try append_tlv(&spki, 0x03, &fake_key);
-    try append_tlv(&tbs, 0x30, spki.items);
+    var spki: std.ArrayList(u8) = .{};
+    defer spki.deinit(allocator);
+    try append_tlv(&spki, allocator, 0x30, &rsa_oid);
+    try append_tlv(&spki, allocator, 0x03, &fake_key);
+    try append_tlv(&tbs, allocator, 0x30, spki.items);
 
     // Wrap tbs in SEQUENCE
-    var tbs_seq = std.ArrayList(u8).init(allocator);
-    defer tbs_seq.deinit();
-    try append_tlv(&tbs_seq, 0x30, tbs.items);
+    var tbs_seq: std.ArrayList(u8) = .{};
+    defer tbs_seq.deinit(allocator);
+    try append_tlv(&tbs_seq, allocator, 0x30, tbs.items);
 
     // signatureAlgorithm (same as above)
-    var sig_algo_wrapper = std.ArrayList(u8).init(allocator);
-    defer sig_algo_wrapper.deinit();
-    try sig_algo_wrapper.appendSlice(&sig_algo_oid);
+    var sig_algo_wrapper: std.ArrayList(u8) = .{};
+    defer sig_algo_wrapper.deinit(allocator);
+    try sig_algo_wrapper.appendSlice(allocator, &sig_algo_oid);
     // Already a SEQUENCE, just copy it
-    var full_sig_algo = std.ArrayList(u8).init(allocator);
-    defer full_sig_algo.deinit();
-    try append_tlv(&full_sig_algo, 0x30, &sig_algo_oid);
+    var full_sig_algo: std.ArrayList(u8) = .{};
+    defer full_sig_algo.deinit(allocator);
+    try append_tlv(&full_sig_algo, allocator, 0x30, &sig_algo_oid);
 
     // signature BIT STRING: fake
     const fake_sig = [_]u8{ 0x00, 0xDE, 0xAD, 0xBE, 0xEF };
 
     // Assemble full certificate
-    var cert_inner = std.ArrayList(u8).init(allocator);
-    defer cert_inner.deinit();
-    try cert_inner.appendSlice(tbs_seq.items);
-    try cert_inner.appendSlice(full_sig_algo.items);
-    try append_tlv(&cert_inner, 0x03, &fake_sig);
+    var cert_inner: std.ArrayList(u8) = .{};
+    defer cert_inner.deinit(allocator);
+    try cert_inner.appendSlice(allocator, tbs_seq.items);
+    try cert_inner.appendSlice(allocator, full_sig_algo.items);
+    try append_tlv(&cert_inner, allocator, 0x03, &fake_sig);
 
-    try append_tlv(&cert, 0x30, cert_inner.items);
+    try append_tlv(&cert, allocator, 0x30, cert_inner.items);
 
-    return cert.toOwnedSlice();
+    return cert.toOwnedSlice(allocator);
 }
 
 test "x509: parse minimal certificate structure" {

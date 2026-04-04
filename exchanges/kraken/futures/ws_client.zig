@@ -103,8 +103,8 @@ pub fn buildSubscribeMessage(
     feed: Feed,
     products: ?[]const []const u8,
 ) ![]u8 {
-    var buf = std.ArrayList(u8).init(allocator);
-    const w = buf.writer();
+    var buf: std.ArrayList(u8) = .{};
+    const w = buf.writer(allocator);
 
     try w.writeAll("{\"event\":\"subscribe\",\"feed\":\"");
     try w.writeAll(feed.name());
@@ -122,7 +122,7 @@ pub fn buildSubscribeMessage(
     }
 
     try w.writeAll("}");
-    return buf.toOwnedSlice();
+    return buf.toOwnedSlice(allocator);
 }
 
 /// Build a signed_challenge response for the challenge-response auth flow.
@@ -135,8 +135,8 @@ pub fn buildChallengeResponse(
     original_challenge: []const u8,
     signed_challenge: []const u8,
 ) ![]u8 {
-    var buf = std.ArrayList(u8).init(allocator);
-    const w = buf.writer();
+    var buf: std.ArrayList(u8) = .{};
+    const w = buf.writer(allocator);
     try w.writeAll("{\"event\":\"challenge\",\"api_key\":\"");
     try w.writeAll(api_key);
     try w.writeAll("\",\"original_challenge\":\"");
@@ -144,7 +144,7 @@ pub fn buildChallengeResponse(
     try w.writeAll("\",\"signed_challenge\":\"");
     try w.writeAll(signed_challenge);
     try w.writeAll("\"}");
-    return buf.toOwnedSlice();
+    return buf.toOwnedSlice(allocator);
 }
 
 /// Build a ping message for keepalive.
