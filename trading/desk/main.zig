@@ -85,6 +85,8 @@ pub fn main() !void {
     var order_arrival_frame: [MAX_ORDERS]u64 = std.mem.zeroes([MAX_ORDERS]u64);
     var viewport_offset: [2]usize = .{ 0, 0 }; // per-instrument scroll offset
     var candle_width: u8 = 3; // shared zoom level
+    var crosshair_active: bool = false;
+    var crosshair_idx: [2]usize = .{ 0, 0 }; // per-instrument cursor position
 
     // Input and focus state
     var input_handler = InputHandler.init();
@@ -221,7 +223,7 @@ pub fn main() !void {
 
         // Chart panel (top-right, replaces positions panel in tab cycle)
         const candle_len = @min(candle_counts[active_instrument], 512);
-        chart_panel.draw(&renderer, panels.chart, candle_history[active_instrument][0..candle_len], theme, viewport_offset[active_instrument], candle_width);
+        chart_panel.draw(&renderer, panels.chart, candle_history[active_instrument][0..candle_len], theme, viewport_offset[active_instrument], candle_width, crosshair_active, crosshair_idx[active_instrument]);
 
         // Order entry panel
         order_entry.draw(&renderer, panels.order_entry, active_panel == PANEL_ORDER_ENTRY, theme);
@@ -255,7 +257,7 @@ pub fn main() !void {
         if (input_handler.frameReset()) |act| {
             _ = processAction(&input_handler, act, &active_panel, &active_instrument, &order_entry,
                 &from_tui, &status_msg, &status_msg_len, &status_msg_frames, &show_positions_overlay,
-                &viewport_offset, &candle_width, &candle_counts);
+                &viewport_offset, &candle_width, &candle_counts, &crosshair_active, &crosshair_idx);
         }
 
         // Process input bytes
@@ -264,7 +266,7 @@ pub fn main() !void {
             if (input_handler.feed(byte, text_mode)) |act| {
                 const should_quit = processAction(&input_handler, act, &active_panel, &active_instrument,
                     &order_entry, &from_tui, &status_msg, &status_msg_len, &status_msg_frames, &show_positions_overlay,
-                    &viewport_offset, &candle_width, &candle_counts);
+                    &viewport_offset, &candle_width, &candle_counts, &crosshair_active, &crosshair_idx);
                 if (should_quit) {
                     _ = from_tui.push(UserCommand{ .quit = {} });
                     goto_done = true;
@@ -300,6 +302,8 @@ fn processAction(
     viewport_offset: *[2]usize,
     candle_width: *u8,
     candle_counts: *[2]usize,
+    crosshair_active: *bool,
+    crosshair_idx: *[2]usize,
 ) bool {
     _ = _handler;
     switch (action) {
@@ -343,32 +347,57 @@ fn processAction(
         },
         .arrow_left => {
             if (active_panel.* != PANEL_ORDER_ENTRY) {
-                // Scroll left (further back in history)
                 const idx = active_instrument.*;
-                const total = candle_counts.*[idx];
-                if (viewport_offset.*[idx] == 0) {
-                    // Start scroll: offset > 0 means scrolled from right edge
-                    // 0 = auto-follow; increment to 1 to start scrolling
-                    if (total > 1) viewport_offset.*[idx] = 1;
+                if (crosshair_active.*) {
+                    // Move crosshair left (clamp to 0)
+                    if (crosshair_idx.*[idx] > 0) {
+                        crosshair_idx.*[idx] -= 1;
+                    }
                 } else {
-                    viewport_offset.*[idx] += 1;
-                    // Clamp to max meaningful offset (total candles - 1)
-                    if (viewport_offset.*[idx] >= total) {
-                        viewport_offset.*[idx] = if (total > 0) total - 1 else 0;
+                    // Scroll left (further back in history)
+                    const total = candle_counts.*[idx];
+                    if (viewport_offset.*[idx] == 0) {
+                        // Start scroll: offset > 0 means scrolled from right edge
+                        // 0 = auto-follow; increment to 1 to start scrolling
+                        if (total > 1) viewport_offset.*[idx] = 1;
+                    } else {
+                        viewport_offset.*[idx] += 1;
+                        // Clamp to max meaningful offset (total candles - 1)
+                        if (viewport_offset.*[idx] >= total) {
+                            viewport_offset.*[idx] = if (total > 0) total - 1 else 0;
+                        }
                     }
                 }
             }
         },
         .arrow_right => {
             if (active_panel.* != PANEL_ORDER_ENTRY) {
-                // Scroll right (toward newest candles)
                 const idx = active_instrument.*;
-                if (viewport_offset.*[idx] > 1) {
-                    viewport_offset.*[idx] -= 1;
+                if (crosshair_active.*) {
+                    // Move crosshair right (clamped to visible_candles - 1)
+                    // We don't know visible count here without panel size, so use a generous max
+                    const total = candle_counts.*[idx];
+                    if (total > 0 and crosshair_idx.*[idx] + 1 < total) {
+                        crosshair_idx.*[idx] += 1;
+                    }
                 } else {
-                    // Back to auto-follow
-                    viewport_offset.*[idx] = 0;
+                    // Scroll right (toward newest candles)
+                    if (viewport_offset.*[idx] > 1) {
+                        viewport_offset.*[idx] -= 1;
+                    } else {
+                        // Back to auto-follow
+                        viewport_offset.*[idx] = 0;
+                    }
                 }
+            }
+        },
+        .toggle_crosshair => {
+            const idx = active_instrument.*;
+            crosshair_active.* = !crosshair_active.*;
+            if (crosshair_active.*) {
+                // When activating, set to last visible candle index
+                const total = candle_counts.*[idx];
+                crosshair_idx.*[idx] = if (total > 0) total - 1 else 0;
             }
         },
         .zoom_in => {

@@ -17,6 +17,7 @@ pub const Action = union(enum) {
     toggle_positions: void,
     zoom_in: void,
     zoom_out: void,
+    toggle_crosshair: void,
 };
 
 const State = enum {
@@ -63,6 +64,10 @@ pub const InputHandler = struct {
                         // 'p' toggles positions overlay unless in text_mode
                         if (c == 'p' and !text_mode) {
                             return Action{ .toggle_positions = {} };
+                        }
+                        // 'c' toggles crosshair mode unless in text_mode
+                        if (c == 'c' and !text_mode) {
+                            return Action{ .toggle_crosshair = {} };
                         }
                         // '+' or '=' zooms in (= because + requires shift on US keyboards)
                         if ((c == '+' or c == '=') and !text_mode) {

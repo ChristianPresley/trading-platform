@@ -181,6 +181,8 @@ pub fn draw(
     theme: *const Theme,
     viewport_offset: usize,
     candle_width: u8,
+    crosshair_active: bool,
+    crosshair_idx: usize,
 ) void {
     if (rect.h < 4 or rect.w < 10) return;
 
@@ -251,6 +253,67 @@ pub fn draw(
             const x: u16 = @intCast(ci * cw);
             drawVolumeBar(renderer, rect.x + 1 + x, vol_y, volume_h, candle.volume, max_volume, theme.volume);
         }
+    }
+
+    // --- SMA-20 overlay ---
+    for (visible, 0..) |_, ci| {
+        const absolute_index = effective_offset + ci;
+        if (primitives.smaCompute(candles, absolute_index, 20)) |sma_val| {
+            const sub = scaleYSub(sma_val, y_min, y_max, chart_h);
+            // Clamp to valid row range
+            const sma_row = @min(sub.row, chart_h -| 1);
+            const sma_col = rect.x + 1 + @as(u16, @intCast(ci * cw)) + cw / 2;
+            renderer.writeColor(theme.indicator_line);
+            const sma_char: []const u8 = if (sub.half == 1)
+                &primitives.HALF_BLOCK_CHARS[3] // ▄
+            else
+                &primitives.UPPER_HALF; // ▀
+            renderer.writeFmt("\x1b[{d};{d}H{s}", .{ rect.y + 2 + sma_row, sma_col, sma_char });
+            renderer.resetColor();
+        }
+    }
+
+    // --- Crosshair rendering ---
+    if (crosshair_active and crosshair_idx < visible.len) {
+        const ch_x = rect.x + 1 + @as(u16, @intCast(crosshair_idx * cw)) + cw / 2;
+
+        // Draw vertical line through entire chart area
+        renderer.writeColor(theme.crosshair);
+        var r: u16 = 0;
+        while (r < chart_h) : (r += 1) {
+            renderer.writeFmt("\x1b[{d};{d}H\xe2\x94\x82", .{ rect.y + 2 + r, ch_x }); // │
+        }
+
+        // Draw OHLCV readout
+        const candle = visible[crosshair_idx];
+        var ohlcv_buf: [128]u8 = undefined;
+
+        const o_whole = @divTrunc(candle.open, 100_000_000);
+        const o_frac = @abs(@rem(candle.open, 100_000_000)) / 1_000_000;
+        const h_whole = @divTrunc(candle.high, 100_000_000);
+        const h_frac = @abs(@rem(candle.high, 100_000_000)) / 1_000_000;
+        const l_whole = @divTrunc(candle.low, 100_000_000);
+        const l_frac = @abs(@rem(candle.low, 100_000_000)) / 1_000_000;
+        const c_whole = @divTrunc(candle.close, 100_000_000);
+        const c_frac = @abs(@rem(candle.close, 100_000_000)) / 1_000_000;
+
+        const ohlcv_str = std.fmt.bufPrint(&ohlcv_buf,
+            "O:{d}.{d:0>2} H:{d}.{d:0>2} L:{d}.{d:0>2} C:{d}.{d:0>2} V:{d}",
+            .{ o_whole, o_frac, h_whole, h_frac, l_whole, l_frac, c_whole, c_frac, candle.volume }) catch "?";
+
+        // Position readout: left half → draw right-aligned; right half → left-aligned
+        const readout_row = rect.y + 1;
+        const ch_relative = crosshair_idx * cw;
+        if (ch_relative > inner_w / 2) {
+            // Left-align: start at x=1
+            renderer.drawText(rect.x + 1, readout_row, ohlcv_str[0..@min(ohlcv_str.len, inner_w)]);
+        } else {
+            // Right-align: end at right edge
+            const str_len = @min(ohlcv_str.len, inner_w);
+            const start_x = rect.x + 1 + (inner_w -| str_len);
+            renderer.drawText(start_x, readout_row, ohlcv_str[0..str_len]);
+        }
+        renderer.resetColor();
     }
 
     // Y axis labels on right edge (inside box): top = max, bottom = min, mid = midpoint
