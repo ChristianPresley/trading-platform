@@ -50,6 +50,18 @@
                 "reveal": "always",
                 "panel": "shared"
             }
+        },
+        {
+            "label": "Coverage",
+            "type": "shell",
+            "command": "zig",
+            "args": ["build", "zcov"],
+            "group": "test",
+            "problemMatcher": "$gcc",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
         }
     ]
 }
