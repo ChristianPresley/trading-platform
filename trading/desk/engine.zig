@@ -33,6 +33,30 @@ const Fill = positions_mod.Fill;
 const matching_mod = @import("matching_engine.zig");
 const MatchingEngine = matching_mod.MatchingEngine;
 
+const basis_mod = @import("basis");
+const BasisStrategy = basis_mod.BasisStrategy;
+const BasisConfig = basis_mod.BasisConfig;
+
+const funding_arb_mod = @import("funding_arb");
+const FundingArbStrategy = funding_arb_mod.FundingArbStrategy;
+const FundingArbConfig = funding_arb_mod.FundingArbConfig;
+
+const twap_mod_algo = @import("twap");
+const TwapAlgo = twap_mod_algo.TwapAlgo;
+const TwapParams = twap_mod_algo.TwapParams;
+const ChildOrder = twap_mod_algo.ChildOrder;
+
+const SyntheticFeed_mod = @import("synthetic.zig");
+
+const ActiveAlgo = struct {
+    twap: TwapAlgo,
+    parent_order_id: u64,
+    instrument_idx: u8,
+    side: twap_mod_algo.Side,
+    arrival_price: i64,
+    active: bool,
+};
+
 const INSTRUMENTS = [_][]const u8{
     "BTC-USD",
     "ETH-USD",
@@ -80,6 +104,12 @@ pub const Engine = struct {
     pos_manager: PositionManager,
     matching: MatchingEngine,
 
+    // Strategy and algo automation
+    basis_strategy: BasisStrategy,
+    funding_arb_strategy: FundingArbStrategy,
+    active_algos: [16]ActiveAlgo,
+    active_algo_count: usize,
+
     pub fn init(
         allocator: std.mem.Allocator,
         to_tui: *SpscRingBuffer(EngineEvent),
@@ -110,6 +140,22 @@ pub const Engine = struct {
             var pm = pos_manager;
             pm.deinit();
         }
+
+        const basis_strategy = try BasisStrategy.init(allocator, BasisConfig{
+            .entry_threshold_bps = 50.0,
+            .exit_threshold_bps = 10.0,
+            .max_position = 100_000_00000000,
+            .instrument_spot = "BTC-USD",
+            .instrument_futures = "BTC-USD-PERP",
+            .days_to_expiry = 90,
+        });
+
+        const funding_arb_strategy = try FundingArbStrategy.init(allocator, FundingArbConfig{
+            .min_rate_bps = 5.0,
+            .max_position = 100_000_00000000,
+            .instrument_spot = "ETH-USD",
+            .instrument_perp = "ETH-USD-PERP",
+        });
 
         const oms = try OrderManager.init(
             allocator,
@@ -144,6 +190,10 @@ pub const Engine = struct {
             .risk = risk,
             .pos_manager = pos_manager,
             .matching = MatchingEngine.init(),
+            .basis_strategy = basis_strategy,
+            .funding_arb_strategy = funding_arb_strategy,
+            .active_algos = std.mem.zeroes([16]ActiveAlgo),
+            .active_algo_count = 0,
         };
     }
 
@@ -153,6 +203,8 @@ pub const Engine = struct {
         self.risk.deinit();
         self.allocator.destroy(self.risk);
         self.pos_manager.deinit();
+        self.basis_strategy.deinit();
+        self.funding_arb_strategy.deinit();
     }
 
     /// Snapshot the L2Book into an OrderbookSnapshot message.
@@ -227,6 +279,10 @@ pub const Engine = struct {
                 }
             }
 
+            // Run strategies and algos
+            self.runStrategies();
+            self.runAlgos();
+
             // Push orderbook snapshots and aggregate candles for each instrument
             for (0..8) |i| {
                 const book = self.feed.getBook(i);
@@ -273,13 +329,29 @@ pub const Engine = struct {
                 _ = self.to_tui.push(EngineEvent{ .position_update = update });
             }
 
+            // Build strategy state string
+            var strat_state_buf: [64]u8 = std.mem.zeroes([64]u8);
+            const strat_state_str = std.fmt.bufPrint(
+                &strat_state_buf,
+                "basis:{s} arb:{s}",
+                .{
+                    @tagName(self.basis_strategy.state),
+                    @tagName(self.funding_arb_strategy.position),
+                },
+            ) catch strat_state_buf[0..0];
+
             // Push status
-            _ = self.to_tui.push(EngineEvent{ .status = msg.StatusUpdate{
+            var status_update = msg.StatusUpdate{
                 .tick = self.tick,
                 .engine_time_ns = 0,
                 .instrument_count = 8,
                 .connected = false,
-            } });
+                .strategy_state = std.mem.zeroes([64]u8),
+                .strategy_state_len = 0,
+            };
+            @memcpy(status_update.strategy_state[0..strat_state_str.len], strat_state_str);
+            status_update.strategy_state_len = @intCast(strat_state_str.len);
+            _ = self.to_tui.push(EngineEvent{ .status = status_update });
 
             // Drain commands from TUI
             while (self.from_tui.pop()) |cmd| {
@@ -300,6 +372,152 @@ pub const Engine = struct {
             }
 
             std.Thread.sleep(100_000_000); // 100ms per tick
+        }
+    }
+
+    fn runStrategies(self: *Engine) void {
+        // Instrument indices for strategy pairs:
+        // BTC-USD=0, BTC-USD-PERP=1, ETH-USD=3 (actually idx 1 in our list), ETH-USD-PERP=4 (idx 4)
+        // Our INSTRUMENTS: [0]=BTC-USD [1]=ETH-USD [2]=SOL-USD [3]=ADA-USD
+        //                  [4]=BTC-USD-PERP [5]=ETH-USD-PERP [6]=SOL-USD-PERP [7]=BTC-USD-20231229
+        // Wait — need to look up by name for correctness
+
+        // Find correct indices
+        const btc_spot_idx: usize = 0; // "BTC-USD"
+        const btc_perp_idx: usize = 4; // "BTC-USD-PERP"
+        const eth_spot_idx: usize = 1; // "ETH-USD"
+        const eth_perp_idx: usize = 5; // "ETH-USD-PERP"
+
+        const current_tick_ns: u128 = @intCast(self.tick * 100_000_000);
+
+        // Basis strategy: BTC spot vs BTC-USD-PERP
+        const btc_spot_book = self.feed.getBook(btc_spot_idx);
+        const btc_perp_book = self.feed.getBook(btc_perp_idx);
+        if (self.basis_strategy.onMarketData(btc_spot_book, btc_perp_book)) |signal| {
+            if (signal.direction != .exit and self.active_algo_count < 16) {
+                // Create TWAP for spot leg
+                const spot_side: twap_mod_algo.Side = if (signal.direction == .enter_long_basis) .buy else .sell;
+                const end_time: u128 = current_tick_ns + 60_000_000_000;
+                const spot_twap = TwapAlgo.init(TwapParams{
+                    .total_qty = signal.spot_qty,
+                    .start_time = current_tick_ns,
+                    .end_time = end_time,
+                    .num_slices = 10,
+                    .instrument = "BTC-USD",
+                    .side = spot_side,
+                    .jitter_pct = 0.1,
+                });
+                const arrival_price = btc_spot_book.midPrice() orelse 0;
+                self.active_algos[self.active_algo_count] = ActiveAlgo{
+                    .twap = spot_twap,
+                    .parent_order_id = self.oms.next_id,
+                    .instrument_idx = @intCast(btc_spot_idx),
+                    .side = spot_side,
+                    .arrival_price = arrival_price,
+                    .active = true,
+                };
+                self.active_algo_count += 1;
+            }
+        }
+
+        // Funding arb strategy: ETH-USD vs ETH-USD-PERP
+        const eth_spot_book = self.feed.getBook(eth_spot_idx);
+        const eth_perp_book = self.feed.getBook(eth_perp_idx);
+        const eth_spot_mid = eth_spot_book.midPrice() orelse 0;
+        const eth_perp_mid = eth_perp_book.midPrice() orelse 0;
+        const funding_rate_bps = SyntheticFeed_mod.SyntheticFeed.computeFundingRate(eth_spot_mid, eth_perp_mid);
+        // Convert i64 basis points to f64 funding rate
+        const funding_rate_f64: f64 = @as(f64, @floatFromInt(funding_rate_bps)) / 10_000.0;
+        if (self.funding_arb_strategy.onFundingRate(funding_rate_f64, current_tick_ns)) |signal| {
+            if (signal.direction != .flat and self.active_algo_count < 16) {
+                const spot_side: twap_mod_algo.Side = if (signal.direction == .long_spot_short_perp) .buy else .sell;
+                const end_time: u128 = current_tick_ns + 60_000_000_000;
+                const spot_twap = TwapAlgo.init(TwapParams{
+                    .total_qty = signal.spot_qty,
+                    .start_time = current_tick_ns,
+                    .end_time = end_time,
+                    .num_slices = 10,
+                    .instrument = "ETH-USD",
+                    .side = spot_side,
+                    .jitter_pct = 0.1,
+                });
+                const arrival_price = eth_spot_mid;
+                self.active_algos[self.active_algo_count] = ActiveAlgo{
+                    .twap = spot_twap,
+                    .parent_order_id = self.oms.next_id,
+                    .instrument_idx = @intCast(eth_spot_idx),
+                    .side = spot_side,
+                    .arrival_price = arrival_price,
+                    .active = true,
+                };
+                self.active_algo_count += 1;
+            }
+        }
+        // Also run convergence monitoring
+        _ = self.funding_arb_strategy.onMarketData(eth_spot_book, eth_perp_book);
+    }
+
+    fn runAlgos(self: *Engine) void {
+        const current_tick_ns: u128 = @intCast(self.tick * 100_000_000);
+
+        for (0..self.active_algo_count) |i| {
+            const algo = &self.active_algos[i];
+            if (!algo.active) continue;
+
+            if (algo.twap.nextSlice(current_tick_ns)) |child| {
+                // Submit child order through pipeline
+                const child_side: oms_mod.Side = if (child.side == .buy) .buy else .sell;
+                const child_order = Order{
+                    .id = 0,
+                    .instrument = child.instrument,
+                    .side = child_side,
+                    .order_type = .market,
+                    .quantity = child.quantity,
+                    .price = null,
+                    .tif = .day,
+                    .status = .validating,
+                    .created_at = 0,
+                    .parent_id = algo.parent_order_id,
+                    .filled_qty = 0,
+                };
+
+                const child_id = self.oms.submitOrder(child_order) catch continue;
+
+                const book = self.feed.getBook(algo.instrument_idx);
+                const fill_result = self.matching.processOrder(
+                    child_id,
+                    algo.instrument_idx,
+                    child_side,
+                    null,
+                    child.quantity,
+                    .market,
+                    book,
+                );
+
+                for (0..fill_result.fill_count) |j| {
+                    const f = &fill_result.fills[j];
+                    self.oms.onExecution(child_id, .fill, FillInfo{
+                        .fill_qty = f.fill_qty,
+                        .fill_price = f.fill_price,
+                    }) catch {};
+                    const fill_side: positions_mod.Side = if (child_side == .buy) .buy else .sell;
+                    self.pos_manager.onFill(Fill{
+                        .instrument = child.instrument,
+                        .side = fill_side,
+                        .quantity = f.fill_qty,
+                        .price = f.fill_price,
+                        .timestamp = current_tick_ns,
+                        .account = "demo",
+                        .currency = "USD",
+                        .settlement_date = 0,
+                    }) catch {};
+                    algo.twap.onFill(.{ .quantity = f.fill_qty, .price = f.fill_price });
+                }
+            }
+
+            if (algo.twap.isComplete()) {
+                algo.active = false;
+            }
         }
     }
 

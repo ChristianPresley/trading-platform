@@ -61,6 +61,8 @@ pub const StatusUpdate = struct {
     engine_time_ns: u128,
     instrument_count: u8,
     connected: bool,
+    strategy_state: [64]u8,
+    strategy_state_len: u8,
 };
 
 pub const CandleUpdate = struct {

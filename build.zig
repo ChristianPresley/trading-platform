@@ -1142,6 +1142,17 @@ pub fn build(b: *std.Build) void {
     });
     _ = thread_mod;
 
+    // Desk-specific strategy modules that use the same orderbook_mod instance as the desk build
+    // to avoid "file exists in multiple modules" compilation errors.
+    const basis_desk_mod = b.createModule(.{
+        .root_source_file = b.path("trading/strategies/basis.zig"),
+    });
+    basis_desk_mod.addImport("orderbook", orderbook_mod);
+    const funding_arb_desk_mod = b.createModule(.{
+        .root_source_file = b.path("trading/strategies/funding_arb.zig"),
+    });
+    funding_arb_desk_mod.addImport("orderbook", orderbook_mod);
+
     // Desk main module (Zig 0.15: addExecutable requires root_module)
     const desk_main_mod = b.createModule(.{
         .root_source_file = b.path("trading/desk/main.zig"),
@@ -1157,8 +1168,8 @@ pub fn build(b: *std.Build) void {
     desk_main_mod.addImport("time", time_mod);
     desk_main_mod.addImport("ring_buffer", ring_buffer_mod);
     desk_main_mod.addImport("bar_aggregator", bar_aggregator_mod);
-    desk_main_mod.addImport("basis", basis_mod);
-    desk_main_mod.addImport("funding_arb", funding_arb_mod);
+    desk_main_mod.addImport("basis", basis_desk_mod);
+    desk_main_mod.addImport("funding_arb", funding_arb_desk_mod);
     desk_main_mod.addImport("twap", twap_mod);
     desk_main_mod.addImport("vpin", vpin_mod);
     desk_main_mod.addImport("tca", tca_mod);
@@ -1196,8 +1207,8 @@ pub fn build(b: *std.Build) void {
     desk_test_mod.addImport("time", time_mod);
     desk_test_mod.addImport("ring_buffer", ring_buffer_mod);
     desk_test_mod.addImport("bar_aggregator", bar_aggregator_mod);
-    desk_test_mod.addImport("basis", basis_mod);
-    desk_test_mod.addImport("funding_arb", funding_arb_mod);
+    desk_test_mod.addImport("basis", basis_desk_mod);
+    desk_test_mod.addImport("funding_arb", funding_arb_desk_mod);
     desk_test_mod.addImport("twap", twap_mod);
     desk_test_mod.addImport("vpin", vpin_mod);
     desk_test_mod.addImport("tca", tca_mod);
@@ -1233,8 +1244,8 @@ pub fn build(b: *std.Build) void {
     headless_main_mod.addImport("time", time_mod);
     headless_main_mod.addImport("ring_buffer", ring_buffer_mod);
     headless_main_mod.addImport("bar_aggregator", bar_aggregator_mod);
-    headless_main_mod.addImport("basis", basis_mod);
-    headless_main_mod.addImport("funding_arb", funding_arb_mod);
+    headless_main_mod.addImport("basis", basis_desk_mod);
+    headless_main_mod.addImport("funding_arb", funding_arb_desk_mod);
     headless_main_mod.addImport("twap", twap_mod);
     headless_main_mod.addImport("vpin", vpin_mod);
     headless_main_mod.addImport("tca", tca_mod);
@@ -1271,8 +1282,8 @@ pub fn build(b: *std.Build) void {
     headless_test_mod.addImport("time", time_mod);
     headless_test_mod.addImport("ring_buffer", ring_buffer_mod);
     headless_test_mod.addImport("bar_aggregator", bar_aggregator_mod);
-    headless_test_mod.addImport("basis", basis_mod);
-    headless_test_mod.addImport("funding_arb", funding_arb_mod);
+    headless_test_mod.addImport("basis", basis_desk_mod);
+    headless_test_mod.addImport("funding_arb", funding_arb_desk_mod);
     headless_test_mod.addImport("twap", twap_mod);
     headless_test_mod.addImport("vpin", vpin_mod);
     headless_test_mod.addImport("tca", tca_mod);
