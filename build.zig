@@ -1157,6 +1157,13 @@ pub fn build(b: *std.Build) void {
     desk_main_mod.addImport("time", time_mod);
     desk_main_mod.addImport("ring_buffer", ring_buffer_mod);
     desk_main_mod.addImport("bar_aggregator", bar_aggregator_mod);
+    desk_main_mod.addImport("basis", basis_mod);
+    desk_main_mod.addImport("funding_arb", funding_arb_mod);
+    desk_main_mod.addImport("twap", twap_mod);
+    desk_main_mod.addImport("vpin", vpin_mod);
+    desk_main_mod.addImport("tca", tca_mod);
+    desk_main_mod.addImport("eod", eod_mod);
+    desk_main_mod.addImport("reconciliation", reconciliation_mod);
 
     // Desk TUI executable
     const desk_exe = b.addExecutable(.{
@@ -1189,6 +1196,13 @@ pub fn build(b: *std.Build) void {
     desk_test_mod.addImport("time", time_mod);
     desk_test_mod.addImport("ring_buffer", ring_buffer_mod);
     desk_test_mod.addImport("bar_aggregator", bar_aggregator_mod);
+    desk_test_mod.addImport("basis", basis_mod);
+    desk_test_mod.addImport("funding_arb", funding_arb_mod);
+    desk_test_mod.addImport("twap", twap_mod);
+    desk_test_mod.addImport("vpin", vpin_mod);
+    desk_test_mod.addImport("tca", tca_mod);
+    desk_test_mod.addImport("eod", eod_mod);
+    desk_test_mod.addImport("reconciliation", reconciliation_mod);
     const desk_tests = b.addTest(.{
         .name = "desk_tui_test",
         .root_module = desk_test_mod,
@@ -1219,6 +1233,13 @@ pub fn build(b: *std.Build) void {
     headless_main_mod.addImport("time", time_mod);
     headless_main_mod.addImport("ring_buffer", ring_buffer_mod);
     headless_main_mod.addImport("bar_aggregator", bar_aggregator_mod);
+    headless_main_mod.addImport("basis", basis_mod);
+    headless_main_mod.addImport("funding_arb", funding_arb_mod);
+    headless_main_mod.addImport("twap", twap_mod);
+    headless_main_mod.addImport("vpin", vpin_mod);
+    headless_main_mod.addImport("tca", tca_mod);
+    headless_main_mod.addImport("eod", eod_mod);
+    headless_main_mod.addImport("reconciliation", reconciliation_mod);
 
     const desk_headless_exe = b.addExecutable(.{
         .name = "desk-headless",
@@ -1250,6 +1271,13 @@ pub fn build(b: *std.Build) void {
     headless_test_mod.addImport("time", time_mod);
     headless_test_mod.addImport("ring_buffer", ring_buffer_mod);
     headless_test_mod.addImport("bar_aggregator", bar_aggregator_mod);
+    headless_test_mod.addImport("basis", basis_mod);
+    headless_test_mod.addImport("funding_arb", funding_arb_mod);
+    headless_test_mod.addImport("twap", twap_mod);
+    headless_test_mod.addImport("vpin", vpin_mod);
+    headless_test_mod.addImport("tca", tca_mod);
+    headless_test_mod.addImport("eod", eod_mod);
+    headless_test_mod.addImport("reconciliation", reconciliation_mod);
     const headless_tests = b.addTest(.{
         .name = "desk_headless_test",
         .root_module = headless_test_mod,

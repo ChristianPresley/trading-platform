@@ -19,7 +19,16 @@ const Order = oms_mod.Order;
 const bar_agg = @import("bar_aggregator");
 const BarAggregator = bar_agg.BarAggregator;
 
-const INSTRUMENTS = [_][]const u8{ "BTC-USD", "ETH-USD" };
+const INSTRUMENTS = [_][]const u8{
+    "BTC-USD",
+    "ETH-USD",
+    "SOL-USD",
+    "ADA-USD",
+    "BTC-USD-PERP",
+    "ETH-USD-PERP",
+    "SOL-USD-PERP",
+    "BTC-USD-20231229",
+};
 
 /// Stub risk validate function (always passes — demo mode).
 fn riskValidateStub(risk: *anyopaque, order: *const Order) bool {
@@ -59,7 +68,7 @@ pub const Engine = struct {
     oms: OrderManager,
 
     // Candle aggregators (one per instrument)
-    candle_aggs: [2]BarAggregator,
+    candle_aggs: [8]BarAggregator,
 
     // Simple position tracking
     positions: [16]SimplePosition,
@@ -96,6 +105,12 @@ pub const Engine = struct {
             .oms = oms,
             .candle_aggs = .{
                 BarAggregator.init(60_000_000_000), // 1-minute bars in ns
+                BarAggregator.init(60_000_000_000),
+                BarAggregator.init(60_000_000_000),
+                BarAggregator.init(60_000_000_000),
+                BarAggregator.init(60_000_000_000),
+                BarAggregator.init(60_000_000_000),
+                BarAggregator.init(60_000_000_000),
                 BarAggregator.init(60_000_000_000),
             },
             .positions = undefined,
@@ -152,7 +167,7 @@ pub const Engine = struct {
             const timestamp_ns: u64 = self.tick * 100_000_000;
 
             // Push orderbook snapshots and aggregate candles for each instrument
-            for (0..2) |i| {
+            for (0..8) |i| {
                 const book = self.feed.getBook(i);
                 const snap = snapshotBook(book, INSTRUMENTS[i]);
                 _ = self.to_tui.push(EngineEvent{ .orderbook_snapshot = snap });
@@ -192,7 +207,7 @@ pub const Engine = struct {
             _ = self.to_tui.push(EngineEvent{ .status = msg.StatusUpdate{
                 .tick = self.tick,
                 .engine_time_ns = 0,
-                .instrument_count = 2,
+                .instrument_count = 8,
                 .connected = false,
             } });
 
@@ -313,7 +328,7 @@ test "engine_candle_aggregation" {
     const SpscRB = SpscRingBuffer(EngineEvent);
     const SpscRBCmd = SpscRingBuffer(UserCommand);
 
-    var to_tui = try SpscRB.init(std.testing.allocator, 4096);
+    var to_tui = try SpscRB.init(std.testing.allocator, 8192);
     defer to_tui.deinit();
     var from_tui = try SpscRBCmd.init(std.testing.allocator, 16);
     defer from_tui.deinit();
@@ -329,7 +344,7 @@ test "engine_candle_aggregation" {
         engine.tick += 1;
         engine.feed.tick();
         const timestamp_ns: u64 = engine.tick * 100_000_000;
-        for (0..2) |i| {
+        for (0..8) |i| {
             const book = engine.feed.getBook(i);
             const snap = Engine.snapshotBook(book, INSTRUMENTS[i]);
             _ = to_tui.push(EngineEvent{ .orderbook_snapshot = snap });
