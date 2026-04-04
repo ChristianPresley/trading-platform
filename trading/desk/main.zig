@@ -74,7 +74,7 @@ pub fn main() !void {
     var orders_buf: [MAX_ORDERS]OrderUpdate = undefined;
     var orders_count: usize = 0;
     var latest_status = std.mem.zeroes(StatusUpdate);
-    var candle_history: [2][64]CandleUpdate = undefined;
+    var candle_history: [2][512]CandleUpdate = undefined;
     var candle_counts: [2]usize = .{ 0, 0 };
     var engine_stopped = false;
     var ticks_since_event: u32 = 0;
@@ -182,8 +182,8 @@ pub fn main() !void {
                             break;
                         }
                     }
-                    // Append to ring buffer (overwrite oldest if at 64)
-                    const slot = candle_counts[idx] % 64;
+                    // Append to ring buffer (overwrite oldest if at 512)
+                    const slot = candle_counts[idx] % 512;
                     candle_history[idx][slot] = cu;
                     candle_counts[idx] += 1;
                 },
@@ -218,8 +218,8 @@ pub fn main() !void {
         }
 
         // Chart panel (top-right, replaces positions panel in tab cycle)
-        const candle_len = @min(candle_counts[active_instrument], 64);
-        chart_panel.draw(&renderer, panels.chart, candle_history[active_instrument][0..candle_len], theme);
+        const candle_len = @min(candle_counts[active_instrument], 512);
+        chart_panel.draw(&renderer, panels.chart, candle_history[active_instrument][0..candle_len], theme, 0, 3);
 
         // Order entry panel
         order_entry.draw(&renderer, panels.order_entry, active_panel == PANEL_ORDER_ENTRY, theme);

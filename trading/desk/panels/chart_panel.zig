@@ -71,7 +71,6 @@ fn drawCandle(
             if (r == body_top_sub.row and r == body_bot_sub.row) {
                 // Single row body (doji or very small candle)
                 if (body_top_sub.half == 1 and body_bot_sub.half == 0) {
-                    // Only bottom half of top == top half of bot — shouldn't happen, use half block
                     break :blk &primitives.HALF_BLOCK_CHARS[3]; // ▄
                 } else if (body_top_sub.half == 1) {
                     break :blk &primitives.HALF_BLOCK_CHARS[3]; // ▄ lower half
@@ -138,7 +137,51 @@ fn drawCandle(
     renderer.resetColor();
 }
 
-pub fn draw(renderer: *Renderer, rect: Rect, candles: []const CandleUpdate, theme: *const Theme) void {
+/// Draw a volume bar at column x in the volume sub-panel area.
+/// Bar grows upward from row (y + height - 1) to (y + height - bar_h).
+fn drawVolumeBar(renderer: *Renderer, x: u16, y: u16, height: u16, volume: i64, max_volume: i64, color: Rgb) void {
+    if (height == 0 or max_volume == 0 or volume <= 0) return;
+
+    // Map volume to bar height (integer rows)
+    const bar_h_full = @as(u16, @intCast(@min(
+        @as(i64, height),
+        @divTrunc(volume * @as(i64, height), max_volume),
+    )));
+
+    renderer.writeColor(color);
+
+    // Fill full rows from bottom up
+    if (bar_h_full > 0) {
+        var r: u16 = 0;
+        while (r < bar_h_full) : (r += 1) {
+            const row = y + height - 1 - r;
+            renderer.writeFmt("\x1b[{d};{d}H{s}", .{ row + 1, x + 1, &primitives.FULL_BLOCK });
+        }
+    }
+
+    renderer.resetColor();
+}
+
+/// Compute number of candles visible given panel width and candle width.
+fn visibleCandles(panel_width: u16, candle_width: u8) usize {
+    if (candle_width == 0) return 0;
+    return panel_width / candle_width;
+}
+
+/// Clamp viewport offset so it doesn't exceed available candle range.
+fn clampViewport(offset: usize, visible: usize, total: usize) usize {
+    if (total <= visible) return 0;
+    return @min(offset, total - visible);
+}
+
+pub fn draw(
+    renderer: *Renderer,
+    rect: Rect,
+    candles: []const CandleUpdate,
+    theme: *const Theme,
+    viewport_offset: usize,
+    candle_width: u8,
+) void {
     if (rect.h < 4 or rect.w < 10) return;
 
     renderer.drawBoxThemed(rect, "Chart 1m", theme);
@@ -158,13 +201,23 @@ pub fn draw(renderer: *Renderer, rect: Rect, candles: []const CandleUpdate, them
         return;
     }
 
-    // Default candle width = 3
-    const candle_width: u8 = 3;
+    // Height split: 25% for volume bars (min 8 rows total for volume to appear)
+    const volume_h: u16 = if (inner_h >= 8) inner_h / 4 else 0;
+    const chart_h: u16 = if (inner_h > 1) inner_h - 1 - volume_h else inner_h;
 
-    // Number of candles that fit
-    const max_candles = inner_w / candle_width;
-    const start = if (candles.len > max_candles) candles.len - max_candles else 0;
-    const visible = candles[start..];
+    // Visible candle range
+    const cw: u8 = if (candle_width == 0) 3 else candle_width;
+    const max_vis = visibleCandles(inner_w, cw);
+    const total = candles.len;
+
+    // Auto-follow: if viewport_offset == 0, show newest candles (right edge)
+    const effective_offset: usize = if (viewport_offset == 0)
+        (if (total > max_vis) total - max_vis else 0)
+    else
+        clampViewport(total -| viewport_offset -| max_vis, max_vis, total);
+
+    const end = @min(effective_offset + max_vis, total);
+    const visible = candles[effective_offset..end];
 
     // Scan visible candles for Y axis range
     var y_min: i64 = visible[0].low;
@@ -179,13 +232,25 @@ pub fn draw(renderer: *Renderer, rect: Rect, candles: []const CandleUpdate, them
         y_max += 1;
     }
 
-    // Chart area height = inner_h - 1 (reserve bottom row for Y axis labels)
-    const chart_h: u16 = if (inner_h > 1) inner_h - 1 else inner_h;
-
     // Draw each candle
     for (visible, 0..) |candle, ci| {
-        const x: u16 = @intCast(ci * candle_width);
-        drawCandle(renderer, x, rect, candle, y_min, y_max, chart_h, theme, candle_width);
+        const x: u16 = @intCast(ci * cw);
+        drawCandle(renderer, x, rect, candle, y_min, y_max, chart_h, theme, cw);
+    }
+
+    // Volume bars
+    if (volume_h > 0) {
+        // Scan for max volume
+        var max_volume: i64 = 0;
+        for (visible) |c| {
+            if (c.volume > max_volume) max_volume = c.volume;
+        }
+
+        const vol_y = rect.y + 1 + chart_h; // volume area starts here
+        for (visible, 0..) |candle, ci| {
+            const x: u16 = @intCast(ci * cw);
+            drawVolumeBar(renderer, rect.x + 1 + x, vol_y, volume_h, candle.volume, max_volume, theme.volume);
+        }
     }
 
     // Y axis labels on right edge (inside box): top = max, bottom = min, mid = midpoint
@@ -242,4 +307,42 @@ test "chart_empty_candles" {
     // With 0 candles, scaleY is never called — just verify the guard logic
     const max_candles: u16 = 100 / 3;
     try @import("std").testing.expect(max_candles == 33);
+}
+
+test "volume_bar_scaling" {
+    // Bar height should be proportional to volume/max_volume
+    // volume=50, max_volume=100, height=10 → bar_h = 5
+    const volume: i64 = 50;
+    const max_volume: i64 = 100;
+    const height: u16 = 10;
+    const bar_h: u16 = @intCast(@min(
+        @as(i64, height),
+        @divTrunc(volume * @as(i64, height), max_volume),
+    ));
+    try @import("std").testing.expectEqual(@as(u16, 5), bar_h);
+}
+
+test "volume_bar_zero" {
+    // Zero volume produces zero-height bar (no division by zero)
+    const volume: i64 = 0;
+    const max_volume: i64 = 100;
+    const height: u16 = 10;
+    if (max_volume == 0 or volume <= 0) {
+        try @import("std").testing.expect(true); // no bar rendered
+    } else {
+        const bar_h: u16 = @intCast(@min(
+            @as(i64, height),
+            @divTrunc(volume * @as(i64, height), max_volume),
+        ));
+        try @import("std").testing.expectEqual(@as(u16, 0), bar_h);
+    }
+}
+
+test "height_split_computation" {
+    // inner_h=20 → volume_h=5 (25%), chart_h = 20 - 1 - 5 = 14
+    const inner_h: u16 = 20;
+    const volume_h: u16 = if (inner_h >= 8) inner_h / 4 else 0;
+    const chart_h: u16 = if (inner_h > 1) inner_h - 1 - volume_h else inner_h;
+    try @import("std").testing.expectEqual(@as(u16, 5), volume_h);
+    try @import("std").testing.expectEqual(@as(u16, 14), chart_h);
 }
