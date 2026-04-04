@@ -1296,4 +1296,23 @@ pub fn build(b: *std.Build) void {
     const run_headless_tests = b.addRunArtifact(headless_tests);
     const test_desk_headless_step = b.step("test-desk-headless", "Run Trading Desk Headless tests");
     test_desk_headless_step.dependOn(&run_headless_tests.step);
+
+    // zcov: coverage analysis tool
+    // Usage: zig build zcov [-- <module-filter>]
+    // Builds the zcov executable, installs it to zig-out/bin/, and provides
+    // a `zcov` build step that runs it.
+    const zcov_mod = b.createModule(.{
+        .root_source_file = b.path("test/zcov/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const zcov_exe = b.addExecutable(.{
+        .name = "zcov",
+        .root_module = zcov_mod,
+    });
+    b.installArtifact(zcov_exe);
+    const zcov_run = b.addRunArtifact(zcov_exe);
+    if (b.args) |run_args| zcov_run.addArgs(run_args);
+    const zcov_step = b.step("zcov", "Run coverage analysis (compiles + runs tests with -ffuzz, reports line coverage)");
+    zcov_step.dependOn(&zcov_run.step);
 }
