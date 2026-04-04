@@ -194,6 +194,8 @@ pub fn main() !void {
                 .shutdown_ack => {
                     engine_stopped = true;
                 },
+                .tca_report => {},   // no-op: TCA report acknowledged but not displayed
+                .eod_report => {},   // no-op: EOD report acknowledged but not displayed
             }
         }
         if (!got_event) {
@@ -443,3 +445,47 @@ fn processAction(
 }
 
 test "desk_smoke" {}
+
+test "synthetic_8_instruments_init" {
+    const SyntheticFeed = @import("synthetic.zig").SyntheticFeed;
+    var feed = try SyntheticFeed.init(std.testing.allocator, 42);
+    defer feed.deinit();
+    // All 8 books should be initialized with depth levels
+    for (0..8) |i| {
+        try std.testing.expect(feed.books[i].bids_len >= 1);
+        try std.testing.expect(feed.books[i].asks_len >= 1);
+    }
+    // Tick should advance
+    feed.tick();
+    try std.testing.expect(feed.tick_count == 1);
+}
+
+test "synthetic_8_instruments_correlation" {
+    const SyntheticFeed = @import("synthetic.zig").SyntheticFeed;
+    var feed = try SyntheticFeed.init(std.testing.allocator, 42);
+    defer feed.deinit();
+    for (0..100) |_| feed.tick();
+    // BTC spot (idx 0) and BTC-USD-PERP (idx 1) should stay within 2% of each other
+    const spot_mid = feed.books[0].midPrice() orelse return error.NoMidPrice;
+    const perp_mid = feed.books[1].midPrice() orelse return error.NoMidPrice;
+    try std.testing.expect(spot_mid > 0);
+    try std.testing.expect(perp_mid > 0);
+    const diff = @abs(perp_mid - spot_mid);
+    const threshold = @divTrunc(spot_mid * 2, 100);
+    try std.testing.expect(diff < threshold);
+}
+
+test "engine_8_instrument_init" {
+    const SpscRB = SpscRingBuffer(EngineEvent);
+    const SpscRBCmd = SpscRingBuffer(UserCommand);
+    var to_tui = try SpscRB.init(std.testing.allocator, 64);
+    defer to_tui.deinit();
+    var from_tui = try SpscRBCmd.init(std.testing.allocator, 16);
+    defer from_tui.deinit();
+    var engine = try Engine.init(std.testing.allocator, &to_tui, &from_tui);
+    defer engine.deinit();
+    // Engine should start at tick 0 with 8 instruments loaded
+    try std.testing.expect(engine.tick == 0);
+    try std.testing.expect(engine.feed.books[0].bids_len >= 1);
+    try std.testing.expect(engine.feed.books[7].bids_len >= 1);
+}
