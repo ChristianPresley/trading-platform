@@ -12,7 +12,7 @@ pub fn historicalVar(returns: []const f64, confidence: f64) !f64 {
     if (returns.len < min_obs) return error.InsufficientData;
 
     // Copy and sort ascending (most negative first)
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -116,7 +116,7 @@ pub fn expectedShortfall(returns: []const f64, confidence: f64) !f64 {
     if (returns.len < min_obs) return error.InsufficientData;
 
     // Copy and sort ascending
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

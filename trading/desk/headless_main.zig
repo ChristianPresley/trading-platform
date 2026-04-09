@@ -24,7 +24,7 @@ pub const HeadlessDesk = struct {
 
         const from_engine = try allocator.create(SpscRingBuffer(EngineEvent));
         errdefer allocator.destroy(from_engine);
-        from_engine.* = try SpscRingBuffer(EngineEvent).init(allocator, 256);
+        from_engine.* = try SpscRingBuffer(EngineEvent).init(allocator, 4096);
         errdefer from_engine.deinit();
 
         // Engine.init takes: to_tui = from_engine, from_tui = to_engine
@@ -70,7 +70,10 @@ pub const HeadlessDesk = struct {
                     else => {},
                 }
             }
-            std.Thread.sleep(1_000_000); // 1ms
+            {
+                const sleep_req = std.os.linux.timespec{ .sec = 0, .nsec = 1_000_000 };
+                _ = std.os.linux.nanosleep(&sleep_req, null); // 1ms
+            }
         }
 
         // If timeout reached without ack, force stop
@@ -89,14 +92,16 @@ pub const HeadlessDesk = struct {
 };
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
     var desk = try HeadlessDesk.init(allocator);
 
     // Run briefly and collect events
-    std.Thread.sleep(300_000_000); // 300ms — a few engine ticks
+    // 300ms — a few engine ticks
+    const req = std.os.linux.timespec{ .sec = 0, .nsec = 300_000_000 };
+    _ = std.os.linux.nanosleep(&req, null);
 
     var event_count: usize = 0;
     while (desk.pop()) |_| {
@@ -119,7 +124,10 @@ test "headless_push_pop" {
     defer desk.shutdown();
 
     // Sleep long enough for the engine to produce at least one event (100ms per tick)
-    std.Thread.sleep(200_000_000); // 200ms
+    {
+        const sleep_req = std.os.linux.timespec{ .sec = 0, .nsec = 200_000_000 };
+        _ = std.os.linux.nanosleep(&sleep_req, null); // 200ms
+    }
 
     var count: usize = 0;
     while (desk.pop()) |_| {
@@ -148,7 +156,10 @@ test "headless_quit_ack" {
             }
         }
         if (received_ack) break;
-        std.Thread.sleep(1_000_000); // 1ms
+        {
+            const sleep_req2 = std.os.linux.timespec{ .sec = 0, .nsec = 1_000_000 };
+            _ = std.os.linux.nanosleep(&sleep_req2, null); // 1ms
+        }
     }
 
     try std.testing.expect(received_ack);

@@ -69,7 +69,7 @@ pub const ReconEngine = struct {
     /// Match trades by ID first, then by (instrument, side, qty, time window).
     /// Flags mismatches as breaks with typed reasons.
     pub fn reconcileTrades(self: *ReconEngine, internal: []const Trade, external: []const Trade) !ReconResult {
-        var breaks: std.ArrayList(Break) = .{};
+        var breaks: std.ArrayList(Break) = .empty;
         errdefer breaks.deinit(self.allocator);
 
         // Track which external trades have been matched
@@ -185,7 +185,7 @@ pub const ReconEngine = struct {
 
     /// Compare position quantities and values within tolerance.
     pub fn reconcilePositions(self: *ReconEngine, internal: []const Position, external: []const Position) !ReconResult {
-        var breaks: std.ArrayList(Break) = .{};
+        var breaks: std.ArrayList(Break) = .empty;
         errdefer breaks.deinit(self.allocator);
 
         var ext_matched = try self.allocator.alloc(bool, external.len);
@@ -285,7 +285,7 @@ pub const ReconEngine = struct {
 
     /// Reconcile cash balances by currency.
     pub fn reconcileCash(self: *ReconEngine, internal: []const CashBalance, external: []const CashBalance) !ReconResult {
-        var breaks: std.ArrayList(Break) = .{};
+        var breaks: std.ArrayList(Break) = .empty;
         errdefer breaks.deinit(self.allocator);
 
         var ext_matched = try self.allocator.alloc(bool, external.len);

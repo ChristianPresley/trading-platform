@@ -81,7 +81,11 @@ test "KrakenFixClient: heartbeat interval is 30s" {
 
 test "KrakenFixClient: logon builds nonce within reasonable time window" {
     // The nonce is a Unix timestamp — we verify it's recent (within 60s of now)
-    const ts_before = @divTrunc(std.time.nanoTimestamp(), std.time.ns_per_s);
+    const ts_before = blk: {
+        var ts_: std.os.linux.timespec = undefined;
+        _ = std.os.linux.clock_gettime(.REALTIME, &ts_);
+        break :blk ts_.sec;
+    };
 
     var client = try fix_client_mod.KrakenFixClient.init(
         std.testing.allocator,
@@ -92,7 +96,11 @@ test "KrakenFixClient: logon builds nonce within reasonable time window" {
 
     try client.logon();
 
-    const ts_after = @divTrunc(std.time.nanoTimestamp(), std.time.ns_per_s);
+    const ts_after = blk: {
+        var ts_: std.os.linux.timespec = undefined;
+        _ = std.os.linux.clock_gettime(.REALTIME, &ts_);
+        break :blk ts_.sec;
+    };
 
     // The nonce timestamp should be between ts_before and ts_after
     // We can't directly inspect it here, but we can verify logon succeeds

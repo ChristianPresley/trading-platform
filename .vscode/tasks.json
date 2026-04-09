@@ -2,9 +2,10 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Build Desk",
+            "label": "Build Desk TUI",
+            "detail": "Build the Trading Desk TUI in debug mode",
             "type": "shell",
-            "command": "zig build build-desk",
+            "command": "zig build build-desk-tui",
             "group": {
                 "kind": "build",
                 "isDefault": true
@@ -16,9 +17,10 @@
             }
         },
         {
-            "label": "Build Desk (Release)",
+            "label": "Build Desk TUI (Release)",
+            "detail": "Build the Trading Desk TUI with release-fast optimizations",
             "type": "shell",
-            "command": "zig build build-desk -Doptimize=ReleaseFast",
+            "command": "zig build build-desk-tui --release=fast",
             "group": "build",
             "problemMatcher": "$gcc",
             "presentation": {
@@ -27,9 +29,34 @@
             }
         },
         {
-            "label": "Run Desk",
+            "label": "Build Desk Headless",
+            "detail": "Build the Trading Desk Headless (no TUI) in debug mode",
             "type": "shell",
-            "command": "zig build run-desk",
+            "command": "zig build build-desk-headless",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "Build Desk Headless (Release)",
+            "detail": "Build the Trading Desk Headless with release-fast optimizations",
+            "type": "shell",
+            "command": "zig build build-desk-headless --release=fast",
+            "group": "build",
+            "problemMatcher": "$gcc",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "Run Desk TUI",
+            "detail": "Build and launch the Trading Desk TUI",
+            "type": "shell",
+            "command": "zig build run-desk-tui",
             "group": "none",
             "problemMatcher": [],
             "presentation": {
@@ -38,9 +65,46 @@
             }
         },
         {
-            "label": "Test Desk",
+            "label": "Run Desk TUI (Release)",
+            "detail": "Build and launch the Trading Desk TUI with release-fast optimizations",
             "type": "shell",
-            "command": "zig build test-desk",
+            "command": "zig build run-desk-tui --release=fast",
+            "group": "none",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            }
+        },
+        {
+            "label": "Run Desk Headless",
+            "detail": "Build and launch the Trading Desk Headless",
+            "type": "shell",
+            "command": "zig build run-desk-headless",
+            "group": "none",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            }
+        },
+        {
+            "label": "Run Desk Headless (Release)",
+            "detail": "Build and launch the Trading Desk Headless with release-fast optimizations",
+            "type": "shell",
+            "command": "zig build run-desk-headless --release=fast",
+            "group": "none",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            }
+        },
+        {
+            "label": "Test All",
+            "detail": "Run all tests across the entire project",
+            "type": "shell",
+            "command": "zig build test",
             "group": {
                 "kind": "test",
                 "isDefault": true
@@ -57,6 +121,102 @@
             "command": "zig",
             "args": ["build", "zcov"],
             "group": "test",
+            "problemMatcher": "$gcc",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "Test Desk TUI",
+            "detail": "Run Trading Desk TUI tests",
+            "type": "shell",
+            "command": "zig build test-desk-tui",
+            "group": "test",
+            "problemMatcher": "$gcc",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "Test Desk Headless",
+            "detail": "Run Trading Desk Headless tests",
+            "type": "shell",
+            "command": "zig build test-desk-headless",
+            "group": "test",
+            "problemMatcher": "$gcc",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "Test Core",
+            "detail": "Run sdk/core tests",
+            "type": "shell",
+            "command": "zig build test-core",
+            "group": "test",
+            "problemMatcher": "$gcc",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "Test Protocol",
+            "detail": "Run sdk/protocol tests",
+            "type": "shell",
+            "command": "zig build test-protocol",
+            "group": "test",
+            "problemMatcher": "$gcc",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "Test WebSocket",
+            "detail": "Run WebSocket tests",
+            "type": "shell",
+            "command": "zig build test-ws",
+            "group": "test",
+            "problemMatcher": "$gcc",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "Test Kraken",
+            "detail": "Run Kraken exchange tests",
+            "type": "shell",
+            "command": "zig build test-kraken",
+            "group": "test",
+            "problemMatcher": "$gcc",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "Clean",
+            "detail": "Remove .zig-cache and zig-out build artifacts",
+            "type": "shell",
+            "command": "rm -rf .zig-cache zig-out",
+            "group": "none",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "Clean Build Desk TUI",
+            "detail": "Clean build artifacts then rebuild the Trading Desk TUI from scratch",
+            "type": "shell",
+            "command": "rm -rf .zig-cache zig-out && zig build build-desk-tui",
+            "group": "build",
             "problemMatcher": "$gcc",
             "presentation": {
                 "reveal": "always",

@@ -2,13 +2,23 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debug Desk",
+            "name": "Debug Desk TUI",
             "type": "lldb",
             "request": "launch",
-            "program": "${workspaceFolder}/zig-out/bin/desk",
+            "program": "${workspaceFolder}/zig-out/bin/desk-tui",
             "args": [],
             "cwd": "${workspaceFolder}",
-            "preLaunchTask": "Build Desk",
+            "preLaunchTask": "Build Desk TUI",
+            "terminal": "integrated"
+        },
+        {
+            "name": "Debug Desk Headless",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/zig-out/bin/desk-headless",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "Build Desk Headless",
             "terminal": "integrated"
         }
     ]

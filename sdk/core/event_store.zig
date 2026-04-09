@@ -62,7 +62,9 @@ fn readU128Le(buf: []const u8) u128 {
 }
 
 fn nowNanos() u128 {
-    const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch return 0;
+    var ts: std.os.linux.timespec = undefined;
+    const rc: isize = @bitCast(std.os.linux.clock_gettime(.REALTIME, &ts));
+    if (rc < 0) return 0;
     return @as(u128, @intCast(ts.sec)) * 1_000_000_000 + @as(u128, @intCast(ts.nsec));
 }
 
@@ -83,7 +85,7 @@ pub const Iterator = struct {
 
         // Read header to determine record size
         var header: [HEADER_SIZE]u8 = undefined;
-        const n = self.store.file.pread(&header, self.current_offset) catch return null;
+        const n = self.store.file.preadAll(&header, self.current_offset) catch return null;
         if (n < HEADER_SIZE) return null;
 
         const data_len = readU32Le(header[24..28]);
@@ -126,7 +128,7 @@ pub const EventStore = struct {
         var offset: u64 = 0;
         while (offset + HEADER_SIZE <= write_offset) {
             var header: [HEADER_SIZE]u8 = undefined;
-            const n = try file.pread(&header, offset);
+            const n = try file.preadAll(&header, offset);
             if (n < HEADER_SIZE) break;
 
             const seq = readU64Le(header[0..8]);
@@ -161,9 +163,8 @@ pub const EventStore = struct {
         writeU128Le(header[8..24], ts);
         writeU32Le(header[24..28], data_len);
 
-        try self.file.seekTo(self.write_offset);
-        try self.file.writeAll(&header);
-        try self.file.writeAll(event);
+        try self.file.pwriteAll(&header, self.write_offset);
+        try self.file.pwriteAll(event, self.write_offset + HEADER_SIZE);
 
         self.write_offset += HEADER_SIZE + data_len;
         self.last_seq = seq;
@@ -177,7 +178,7 @@ pub const EventStore = struct {
         var offset: u64 = 0;
         while (offset + HEADER_SIZE <= self.write_offset) {
             var header: [HEADER_SIZE]u8 = undefined;
-            const n = try self.file.pread(&header, offset);
+            const n = try self.file.preadAll(&header, offset);
             if (n < HEADER_SIZE) return error.EventNotFound;
 
             const event_seq = readU64Le(header[0..8]);
@@ -186,7 +187,7 @@ pub const EventStore = struct {
 
             if (event_seq == seq) {
                 const buf = try self.allocator.alloc(u8, data_len);
-                const read_n = try self.file.pread(buf, data_offset);
+                const read_n = try self.file.preadAll(buf, data_offset);
                 if (read_n < data_len) {
                     self.allocator.free(buf);
                     return error.TruncatedEvent;
@@ -204,7 +205,7 @@ pub const EventStore = struct {
         if (offset + HEADER_SIZE > @as(usize, @intCast(self.write_offset))) return error.EndOfStore;
 
         var header: [HEADER_SIZE]u8 = undefined;
-        const n = try self.file.pread(&header, offset);
+        const n = try self.file.preadAll(&header, offset);
         if (n < HEADER_SIZE) return error.EndOfStore;
 
         const seq = readU64Le(header[0..8]);
@@ -216,7 +217,7 @@ pub const EventStore = struct {
 
         const buf = try self.allocator.alloc(u8, data_len);
         errdefer self.allocator.free(buf);
-        const read_n = try self.file.pread(buf, data_offset);
+        const read_n = try self.file.preadAll(buf, data_offset);
         if (read_n < data_len) return error.TruncatedEvent;
 
         return Event{
@@ -232,7 +233,7 @@ pub const EventStore = struct {
         var offset: u64 = 0;
         while (offset + HEADER_SIZE <= self.write_offset) {
             var header: [HEADER_SIZE]u8 = undefined;
-            const n = self.file.pread(&header, offset) catch break;
+            const n = self.file.preadAll(&header, offset) catch break;
             if (n < HEADER_SIZE) break;
 
             const event_seq = readU64Le(header[0..8]);

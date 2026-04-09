@@ -4,9 +4,9 @@
 const std = @import("std");
 const Terminal = @import("terminal.zig").Terminal;
 const layout = @import("layout.zig");
-const Rect = layout.Rect;
-const theme_mod = @import("theme.zig");
-const Rgb = theme_mod.Rgb;
+pub const Rect = layout.Rect;
+pub const theme_mod = @import("theme.zig");
+pub const Rgb = theme_mod.Rgb;
 const Theme = theme_mod.Theme;
 
 pub const Renderer = struct {
@@ -141,7 +141,14 @@ pub const Renderer = struct {
 
     /// Flush frame buffer to terminal in one write.
     pub fn endFrame(self: *Renderer) !void {
-        _ = try self.terminal.stdout.write(self.buf[0..self.cursor]);
+        var written: usize = 0;
+        const data = self.buf[0..self.cursor];
+        while (written < data.len) {
+            const rc = std.os.linux.write(self.terminal.stdout_fd, data[written..].ptr, data[written..].len);
+            const signed: isize = @bitCast(rc);
+            if (signed < 0) return error.WriteFailed;
+            written += @intCast(rc);
+        }
         self.terminal.buf_pos = 0;
     }
 

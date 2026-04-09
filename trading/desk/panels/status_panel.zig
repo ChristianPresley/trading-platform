@@ -23,7 +23,7 @@ fn lerpColor(from: Rgb, to: Rgb, t: u32, max_t: u32) Rgb {
     };
 }
 
-pub fn draw(renderer: *Renderer, rect: Rect, status: *const StatusUpdate, msg_age_frames: u32, theme: *const Theme) void {
+pub fn draw(renderer: *Renderer, rect: Rect, status: *const StatusUpdate, msg_age_frames: u32, theme: *const Theme, instrument_name: []const u8) void {
     // No border for status bar — single row
     const tick_sec = status.tick / 10; // rough seconds (10 ticks/sec)
     const h = tick_sec / 3600;
@@ -36,8 +36,9 @@ pub fn draw(renderer: *Renderer, rect: Rect, status: *const StatusUpdate, msg_ag
     const text_color = lerpColor(theme.text, theme.text_dim, age, fade_frames);
 
     renderer.writeColor(text_color);
-    renderer.writeFmt("\x1b[{d};{d}HBTC-USD | Tick: {d} | {d:02}:{d:02}:{d:02} | Demo Mode | q=quit | p=positions", .{
+    renderer.writeFmt("\x1b[{d};{d}H{s} | Tick: {d} | {d:02}:{d:02}:{d:02} | Demo | i=pair q=quit p=pos", .{
         rect.y + 1, rect.x + 1,
+        instrument_name,
         status.tick,
         h, m, s,
     });

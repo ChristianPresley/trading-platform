@@ -16,7 +16,7 @@ pub const SeqStore = struct {
     pub fn init(allocator: std.mem.Allocator) !SeqStore {
         return .{
             .allocator = allocator,
-            .entries = .{},
+            .entries = .empty,
         };
     }
 

@@ -108,7 +108,7 @@ pub const SyntheticFeed = struct {
 
         for (0..DEPTH) |i| {
             const offset: i64 = @intCast(i + 1);
-            const qty: i64 = @intCast(rand.intRangeAtMost(u64, 100_000, 10_000_000));
+            const qty: i64 = @intCast(rand.intRangeAtMost(u64, 10_000_000, 1_000_000_000));
             bid_levels[i] = Level{ .price = base_price - offset * ts, .quantity = qty };
             ask_levels[i] = Level{ .price = base_price + offset * ts, .quantity = qty };
         }
@@ -155,7 +155,7 @@ pub const SyntheticFeed = struct {
             const num_updates: usize = rand.intRangeAtMost(usize, 1, 3);
             for (0..num_updates) |_| {
                 const level_idx: i64 = @intCast(rand.intRangeAtMost(u64, 1, DEPTH - 1));
-                const qty: i64 = @intCast(rand.intRangeAtMost(u64, 100_000, 10_000_000));
+                const qty: i64 = @intCast(rand.intRangeAtMost(u64, 10_000_000, 1_000_000_000));
                 const bid_price = base - level_idx * tick_size;
                 const ask_price = base + level_idx * tick_size;
                 book.applyUpdate(.bid, bid_price, qty);
@@ -175,7 +175,7 @@ pub const SyntheticFeed = struct {
         if (spot_mid == 0) return 0;
         const k: i64 = 100;
         const scale: i64 = 10_000; // basis points scale
-        const raw = k * (perp_mid - spot_mid) * scale / spot_mid;
+        const raw = @divTrunc(k * (perp_mid - spot_mid) * scale, spot_mid);
         // Clamp to ±1% = ±100 basis points
         const max_rate: i64 = 100;
         if (raw > max_rate) return max_rate;

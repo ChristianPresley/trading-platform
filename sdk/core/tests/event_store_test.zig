@@ -4,7 +4,7 @@ const event_store = @import("event_store");
 /// Helper: get an absolute path inside a tmpDir for a given filename.
 /// Creates the file first so realpath works, then returns the absolute path.
 fn tmpPath(tmp: *std.testing.TmpDir, filename: []const u8, buf: []u8) ![]const u8 {
-    // Create an empty file so realpath can resolve it
+    // Create an empty file so realpath works, then return the absolute path
     const f = try tmp.dir.createFile(filename, .{});
     f.close();
     return try tmp.dir.realpath(filename, buf);
@@ -121,7 +121,7 @@ test "EventStore: replay from arbitrary sequence" {
 
     // Replay from seq 3 — should get events 3, 4, 5
     var iter = store.replay(3);
-    var seqs: std.ArrayList(u64) = .{};
+    var seqs: std.ArrayList(u64) = .empty;
     defer seqs.deinit(std.testing.allocator);
 
     while (iter.next()) |evt| {

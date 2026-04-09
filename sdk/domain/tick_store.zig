@@ -58,6 +58,7 @@ fn zigzagDecode(value: u64) i64 {
 const Partition = struct {
     date_tag: u32, // YYYYMMDD
     file: std.fs.File,
+    write_offset: u64,
     last_timestamp: u128,
     last_price: i64,
     tick_count: u64,
@@ -137,10 +138,12 @@ pub const TickStore = struct {
 
     pub fn init(allocator: std.mem.Allocator, base_path: []const u8) !TickStore {
         // Create base directory if not exists
-        std.fs.makeDirAbsolute(base_path) catch |err| switch (err) {
-            error.PathAlreadyExists => {},
-            else => return err,
-        };
+        {
+            var path_buf: [1024]u8 = undefined;
+            const z_path = std.fmt.bufPrintZ(&path_buf, "{s}", .{base_path}) catch return error.NameTooLong;
+            const rc: isize = @bitCast(std.os.linux.mkdir(z_path, 0o755));
+            if (rc < 0 and rc != -@as(isize, @intFromEnum(std.os.linux.E.EXIST))) return error.MkdirFailed;
+        }
 
         return TickStore{
             .allocator = allocator,
@@ -183,11 +186,9 @@ pub const TickStore = struct {
 
     fn ensureInstrumentDir(self: *TickStore, instrument: []const u8) !void {
         var buf: [1024]u8 = undefined;
-        const dir_path = try std.fmt.bufPrint(&buf, "{s}/{s}", .{ self.base_path, instrument });
-        std.fs.makeDirAbsolute(dir_path) catch |err| switch (err) {
-            error.PathAlreadyExists => {},
-            else => return err,
-        };
+        const z_path = std.fmt.bufPrintZ(&buf, "{s}/{s}", .{ self.base_path, instrument }) catch return error.NameTooLong;
+        const rc: isize = @bitCast(std.os.linux.mkdir(z_path, 0o755));
+        if (rc < 0 and rc != -@as(isize, @intFromEnum(std.os.linux.E.EXIST))) return error.MkdirFailed;
     }
 
     fn openPartition(self: *TickStore, instrument: []const u8, date_tag: u32) !*Partition {
@@ -201,12 +202,14 @@ pub const TickStore = struct {
             .truncate = false,
         });
 
-        // Seek to end for appending
-        try file.seekFromEnd(0);
+        // Determine file length for append offset
+        const stat = try file.stat();
+        const file_len = stat.size;
 
         const part = Partition{
             .date_tag = date_tag,
             .file = file,
+            .write_offset = file_len,
             .last_timestamp = 0,
             .last_price = 0,
             .tick_count = 0,
@@ -246,7 +249,8 @@ pub const TickStore = struct {
         buf[offset] = @intFromEnum(tick.side);
         offset += 1;
 
-        _ = try part.file.write(buf[0..offset]);
+        try part.file.pwriteAll(buf[0..offset], part.write_offset);
+        part.write_offset += offset;
 
         part.last_timestamp = tick.timestamp;
         part.last_price = tick.price;
@@ -271,7 +275,7 @@ pub const TickStore = struct {
         const to_date = dateTagFromNs(to);
 
         // Collect all data from relevant partitions
-        var all_data: std.ArrayList(u8) = .{};
+        var all_data: std.ArrayList(u8) = .empty;
         errdefer all_data.deinit(self.allocator);
 
         var current_date = from_date;
@@ -292,7 +296,7 @@ pub const TickStore = struct {
             if (file_size > 0) {
                 const start = all_data.items.len;
                 try all_data.resize(self.allocator, start + file_size);
-                _ = try file.readAll(all_data.items[start..]);
+                _ = try file.preadAll(all_data.items[start..], 0);
             }
 
             current_date = nextDate(current_date);

@@ -103,8 +103,8 @@ pub fn buildSubscribeMessage(
     feed: Feed,
     products: ?[]const []const u8,
 ) ![]u8 {
-    var buf: std.ArrayList(u8) = .{};
-    const w = buf.writer(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    const w = &aw.writer;
 
     try w.writeAll("{\"event\":\"subscribe\",\"feed\":\"");
     try w.writeAll(feed.name());
@@ -122,7 +122,7 @@ pub fn buildSubscribeMessage(
     }
 
     try w.writeAll("}");
-    return buf.toOwnedSlice(allocator);
+    return try aw.toOwnedSlice();
 }
 
 /// Build a signed_challenge response for the challenge-response auth flow.
@@ -135,8 +135,8 @@ pub fn buildChallengeResponse(
     original_challenge: []const u8,
     signed_challenge: []const u8,
 ) ![]u8 {
-    var buf: std.ArrayList(u8) = .{};
-    const w = buf.writer(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    const w = &aw.writer;
     try w.writeAll("{\"event\":\"challenge\",\"api_key\":\"");
     try w.writeAll(api_key);
     try w.writeAll("\",\"original_challenge\":\"");
@@ -144,7 +144,7 @@ pub fn buildChallengeResponse(
     try w.writeAll("\",\"signed_challenge\":\"");
     try w.writeAll(signed_challenge);
     try w.writeAll("\"}");
-    return buf.toOwnedSlice(allocator);
+    return try aw.toOwnedSlice();
 }
 
 /// Build a ping message for keepalive.
@@ -265,7 +265,11 @@ pub const FuturesWsClient = struct {
 
     /// Send a ping (sets last_ping_ns to current simulated time).
     pub fn ping(self: *FuturesWsClient) ![]u8 {
-        self.last_ping_ns = @intCast(std.time.nanoTimestamp());
+        self.last_ping_ns = @intCast(blk: {
+            var ts_: std.os.linux.timespec = undefined;
+            _ = std.os.linux.clock_gettime(.REALTIME, &ts_);
+            break :blk @as(i128, ts_.sec) * 1_000_000_000 + @as(i128, ts_.nsec);
+        });
         return buildPingMessage(self.allocator);
     }
 

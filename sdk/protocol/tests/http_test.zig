@@ -109,11 +109,11 @@ test "chunked: uppercase hex chunk size" {
 
 test "chunked: large chunk" {
     const allocator = std.testing.allocator;
-    var encoded: std.ArrayList(u8) = .{};
+    var encoded: std.ArrayList(u8) = .empty;
     defer encoded.deinit(allocator);
 
     const chunk_data = "A" ** 256;
-    try encoded.writer(allocator).print("100\r\n{s}\r\n0\r\n\r\n", .{chunk_data});
+    try encoded.print(allocator, "100\r\n{s}\r\n0\r\n\r\n", .{chunk_data});
 
     const decoded = try chunked_mod.decode(allocator, encoded.items);
     defer allocator.free(decoded);

@@ -6,7 +6,7 @@ const std = @import("std");
 /// Returns a newly allocated slice containing the decoded body.
 /// Caller must free the returned slice.
 pub fn decode(allocator: std.mem.Allocator, data: []const u8) ![]const u8 {
-    var result: std.ArrayList(u8) = .{};
+    var result: std.ArrayList(u8) = .empty;
     errdefer result.deinit(allocator);
 
     var pos: usize = 0;
@@ -65,7 +65,7 @@ fn findLineEnd(data: []const u8, start: usize) ?LineEnd {
 /// Decode chunked data from a generic reader (reads until 0-length chunk).
 /// Returns allocated slice with decoded body.
 pub fn decodeFromReader(allocator: std.mem.Allocator, reader: anytype) ![]const u8 {
-    var result: std.ArrayList(u8) = .{};
+    var result: std.ArrayList(u8) = .empty;
     errdefer result.deinit(allocator);
 
     var line_buf: [128]u8 = undefined;

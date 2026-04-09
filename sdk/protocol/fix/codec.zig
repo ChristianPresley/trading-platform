@@ -19,7 +19,7 @@ pub const FixMessage = struct {
     pub fn init(allocator: std.mem.Allocator) FixMessage {
         return .{
             .allocator = allocator,
-            .entries = .{},
+            .entries = .empty,
         };
     }
 

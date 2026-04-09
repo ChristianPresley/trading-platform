@@ -1,0 +1,46 @@
+{
+  "target_coverage_pct": 70,
+  "achieved_coverage_pct": 81.0,
+  "status": "COMPLETE",
+  "harness_files": [
+    "test/zcov/report.zig",
+    "test/zcov/coverage.zig",
+    "test/zcov/main.zig"
+  ],
+  "functions": {
+    "report.zig": {
+      "file_coverage_pct": 93.2,
+      "ModuleSummary.percentage": { "lines": [15,19], "status": "tested", "tests": ["normal", "zero_total", "100_pct", "small_fraction"] },
+      "classifyModule": { "lines": [98,103], "status": "tested", "tests": ["matches_known", "falls_back_other", "empty_path", "first_match_wins"] },
+      "printBar": { "lines": [107,123], "status": "tested", "tests": ["0_pct", "100_pct", "50_pct", "width_0"] },
+      "printReport": { "lines": [24,90], "status": "tested", "tests": ["empty_data", "single_module", "multiple_modules", "other_bucket", "all_modules"] }
+    },
+    "coverage.zig": {
+      "file_coverage_pct": 91.2,
+      "CoverageData.deinit": { "lines": [23,27], "status": "tested", "tests": ["frees_allocations"] },
+      "collectCoverage": { "lines": [35,72], "status": "tested", "tests": ["nonexistent_binary"] },
+      "readAllCoveredPcs": { "lines": [78,105], "status": "tested", "tests": ["reads_v_subdir", "missing_dir", "no_v_subdir", "multiple_files"] },
+      "readCoveredPcsFromFile": { "lines": [107,143], "status": "tested", "tests": ["parses_2_pcs", "partial_seen", "file_too_small", "zero_pcs", "missing_file", "deduplicates"] },
+      "aggregateByFile": { "lines": [144,213], "status": "tested", "tests": ["groups_by_file", "empty_locs", "invalid_skipped", "multiple_files"] }
+    },
+    "main.zig": {
+      "file_coverage_pct": 66.2,
+      "main": { "lines": [20,104], "status": "not_tested", "reason": "orchestration fn with process.exit — remaining untestable lines" },
+      "runCommand": { "lines": [105,124], "status": "tested", "tests": ["success", "build_failed", "respects_cwd", "nonexistent_binary"] },
+      "runAllTestBinaries": { "lines": [125,139], "status": "tested", "tests": ["runs_multiple", "logs_warning", "empty_list"] },
+      "collectAndFilter": { "lines": [140,167], "status": "tested", "tests": ["nonexistent_returns_empty", "applies_filter", "empty_list"] },
+      "filterAppend": { "lines": [168,189], "status": "tested", "tests": ["no_filter_keeps_all", "filter_keeps_matching", "filter_matches_none", "empty_data"] },
+      "findTestBinaries": { "lines": [190,232], "status": "tested", "tests": ["missing_cache", "ignores_extensions", "finds_binaries", "multiple_dirs", "skips_non_dirs"] },
+      "runTestBinaryForCoverage": { "lines": [233,250], "status": "tested", "tests": ["bin_true", "bin_false"] }
+    }
+  },
+  "total_tests": 21,
+  "checkpoints": [
+    {"timestamp": "2026-04-04T20:50:00", "event": "report.zig tests complete", "tests": 17},
+    {"timestamp": "2026-04-04T20:53:00", "event": "coverage.zig tests complete", "tests": 16},
+    {"timestamp": "2026-04-04T20:54:00", "event": "main.zig tests complete (round 1)", "tests": 7},
+    {"timestamp": "2026-04-04T20:55:00", "event": "coverage target achieved: 70.5%", "tests": 40},
+    {"timestamp": "2026-04-04T21:05:00", "event": "main.zig refactored + tests added (round 2)", "tests": 21},
+    {"timestamp": "2026-04-04T21:06:00", "event": "main.zig at 66.2%, overall at 81.0%", "tests": 54}
+  ]
+}

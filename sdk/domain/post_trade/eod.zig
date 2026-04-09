@@ -47,7 +47,7 @@ pub const EodProcessor = struct {
     pub fn init(allocator: std.mem.Allocator) !EodProcessor {
         return EodProcessor{
             .allocator = allocator,
-            .snapshots = .{},
+            .snapshots = .empty,
         };
     }
 
@@ -59,7 +59,11 @@ pub const EodProcessor = struct {
     pub fn snapshotPositions(self: *EodProcessor, positions: []const EodPositionView) ![]const PositionSnapshot {
         self.snapshots.clearRetainingCapacity();
 
-        const now_ms = @as(u64, @intCast(@divTrunc(std.time.nanoTimestamp(), std.time.ns_per_ms)));
+        const now_ms = blk: {
+            var ts: std.os.linux.timespec = undefined;
+            _ = std.os.linux.clock_gettime(.REALTIME, &ts);
+            break :blk @as(u64, @intCast(ts.sec)) * 1000 + @as(u64, @intCast(@divTrunc(ts.nsec, 1_000_000)));
+        };
 
         for (positions) |pos| {
             try self.snapshots.append(self.allocator, .{
@@ -118,7 +122,11 @@ pub const EodProcessor = struct {
     ) !EodReport {
         const pnl = try self.computeDailyPnl(positions, marks);
         const recon_result = try recon_engine.reconcileTrades(internal_trades, external_trades);
-        const now_ms = @as(u64, @intCast(@divTrunc(std.time.nanoTimestamp(), std.time.ns_per_ms)));
+        const now_ms = blk: {
+            var ts: std.os.linux.timespec = undefined;
+            _ = std.os.linux.clock_gettime(.REALTIME, &ts);
+            break :blk @as(u64, @intCast(ts.sec)) * 1000 + @as(u64, @intCast(@divTrunc(ts.nsec, 1_000_000)));
+        };
 
         return EodReport{
             .date_ms = now_ms,

@@ -163,7 +163,11 @@ pub const FuturesExecutor = struct {
     pub fn setDeadManSwitch(self: *FuturesExecutor, timeout_s: u32) !void {
         self.dms.enabled = true;
         self.dms.timeout_s = timeout_s;
-        self.dms.last_refresh_ns = @intCast(std.time.nanoTimestamp());
+        self.dms.last_refresh_ns = @intCast(blk: {
+            var ts_: std.os.linux.timespec = undefined;
+            _ = std.os.linux.clock_gettime(.REALTIME, &ts_);
+            break :blk @as(i128, ts_.sec) * 1_000_000_000 + @as(i128, ts_.nsec);
+        });
         self.dead_man_switch_send_count += 1;
         // Production: call REST cancelAllOrdersAfter API with timeout_s
         // In tests: increment counter to verify it was called
@@ -175,7 +179,11 @@ pub const FuturesExecutor = struct {
     pub fn refreshDeadManSwitch(self: *FuturesExecutor) !void {
         if (!self.dms.enabled) return error.DeadManSwitchNotEnabled;
         // Attempt to extend the switch
-        self.dms.last_refresh_ns = @intCast(std.time.nanoTimestamp());
+        self.dms.last_refresh_ns = @intCast(blk: {
+            var ts_: std.os.linux.timespec = undefined;
+            _ = std.os.linux.clock_gettime(.REALTIME, &ts_);
+            break :blk @as(i128, ts_.sec) * 1_000_000_000 + @as(i128, ts_.nsec);
+        });
         self.dead_man_switch_send_count += 1;
         // Production: call REST cancelAllOrdersAfter again with same timeout_s
         // On network error: log warning and return (caller retries on next cycle)

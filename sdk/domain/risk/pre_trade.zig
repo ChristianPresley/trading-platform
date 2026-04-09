@@ -61,8 +61,8 @@ pub const PreTradeRisk = struct {
             .allocator = allocator,
             .config = config,
             .positions = std.StringHashMap(i64).init(allocator),
-            .rate_window = .{},
-            .dedup_entries = .{},
+            .rate_window = .empty,
+            .dedup_entries = .empty,
             .ref_prices = std.StringHashMap(i64).init(allocator),
         };
     }
@@ -122,12 +122,17 @@ pub const PreTradeRisk = struct {
         const one_second_ns: u64 = 1_000_000_000;
         const window_start = if (now_ns >= one_second_ns) now_ns - one_second_ns else 0;
 
-        // Count orders within the last second
-        var count: u32 = 0;
+        // Prune expired timestamps to prevent unbounded growth
+        var wi: usize = 0;
         for (self.rate_window.items) |ts| {
-            if (ts >= window_start) count += 1;
+            if (ts >= window_start) {
+                self.rate_window.items[wi] = ts;
+                wi += 1;
+            }
         }
-        if (count >= self.config.max_order_rate) return .{ .rejected = .rate_exceeded };
+        self.rate_window.items.len = wi;
+
+        if (wi >= self.config.max_order_rate) return .{ .rejected = .rate_exceeded };
 
         // Record this order in the rate window
         self.rate_window.append(self.allocator, now_ns) catch {};
@@ -148,11 +153,19 @@ pub const PreTradeRisk = struct {
             else
                 0;
 
+            // Prune expired dedup entries to prevent unbounded growth
+            var di: usize = 0;
             for (self.dedup_entries.items) |entry| {
                 if (entry.timestamp_ms >= window_start_ms) {
-                    if (dedupKeyEql(entry.key, dedup_key)) {
-                        return .{ .rejected = .duplicate_detected };
-                    }
+                    self.dedup_entries.items[di] = entry;
+                    di += 1;
+                }
+            }
+            self.dedup_entries.items.len = di;
+
+            for (self.dedup_entries.items) |entry| {
+                if (dedupKeyEql(entry.key, dedup_key)) {
+                    return .{ .rejected = .duplicate_detected };
                 }
             }
 
@@ -167,7 +180,9 @@ pub const PreTradeRisk = struct {
     }
 
     fn nowNanos() u64 {
-        const ts = std.posix.clock_gettime(std.posix.CLOCK.MONOTONIC) catch return 0;
+        var ts: std.os.linux.timespec = undefined;
+        const rc = std.os.linux.clock_gettime(.MONOTONIC, &ts);
+        if (@as(isize, @bitCast(rc)) < 0) return 0;
         return @as(u64, @intCast(ts.sec)) * 1_000_000_000 + @as(u64, @intCast(ts.nsec));
     }
 

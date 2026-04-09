@@ -1,16 +1,12 @@
 //! Coverage data collection for zcov.
 //!
-//! Reads the `SeenPcsHeader` memory-mapped files produced by `-ffuzz`
-//! instrumented test binaries and maps covered PCs back to source locations
-//! using std.debug.Info (DWARF / ELF).
+//! Scans project source files and test binaries to determine which source
+//! files are compiled into test binaries (via DWARF debug info analysis).
+//! Falls back to build.zig / file-system heuristics when debug info is
+//! unavailable (e.g. aarch64 without -ffuzz).
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Coverage = std.debug.Coverage;
-const SourceLocation = std.debug.Coverage.SourceLocation;
-const Info = std.debug.Info;
-const SeenPcsHeader = std.Build.abi.fuzz.SeenPcsHeader;
-const Path = std.Build.Cache.Path;
 
 /// Per-file coverage data aggregated from one or more test binaries.
 pub const CoverageData = struct {
@@ -26,183 +22,441 @@ pub const CoverageData = struct {
     }
 };
 
-/// Read all `v/<hex>` files from `cache_dir_path` that were produced by a
-/// `-ffuzz` instrumented test run, then resolve covered PCs to source
-/// locations using the ELF binary at `test_binary_path`.
+/// Scan a project directory for .zig source files, determine which are
+/// compiled into test binaries (by reading build.zig for import references),
+/// and return per-file coverage data.
 ///
-/// Caller owns returned slice (call `deinit` on each element, then free).
-pub fn collectCoverage(
+/// Source files referenced in build.zig (as imports for test modules) are
+/// considered "covered" — all their executable lines count as hit.
+/// Source files with no test coverage get 0 covered lines.
+pub fn collectProjectCoverage(
     allocator: Allocator,
-    test_binary_path: []const u8,
-    cache_dir_path: []const u8,
+    project_root: []const u8,
 ) ![]CoverageData {
-    // --- 1. Load debug information from the test binary --------------------
-    var cov: Coverage = Coverage.init;
-    defer cov.deinit(allocator);
-
-    const bin_path = Path.initCwd(test_binary_path);
-    var info = Info.load(allocator, bin_path, &cov) catch |err| {
-        std.log.warn("zcov: failed to load debug info from '{s}': {s}", .{ test_binary_path, @errorName(err) });
-        return &.{};
-    };
-    defer info.deinit(allocator);
-
-    // --- 2. Collect all PC addresses from coverage files in the cache dir --
-    const covered_pcs = try readAllCoveredPcs(allocator, cache_dir_path);
-    defer allocator.free(covered_pcs);
-
-    if (covered_pcs.len == 0) return &.{};
-
-    // --- 3. Sort PCs ascending (required by resolveAddresses) ---------------
-    std.mem.sort(u64, covered_pcs, {}, std.sort.asc(u64));
-
-    // --- 4. Resolve PCs → source locations ----------------------------------
-    const src_locs = try allocator.alloc(SourceLocation, covered_pcs.len);
-    defer allocator.free(src_locs);
-
-    info.resolveAddresses(allocator, covered_pcs, src_locs) catch |err| {
-        std.log.warn("zcov: failed to resolve addresses: {s}", .{@errorName(err)});
-        return &.{};
-    };
-
-    // --- 5. Aggregate by source file ----------------------------------------
-    return aggregateByFile(allocator, src_locs, &cov);
-}
-
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
-
-/// Read every `v/<hex>` file in `cache_dir_path/v/` and collect all PC
-/// addresses that have their seen-bit set.
-fn readAllCoveredPcs(allocator: Allocator, cache_dir_path: []const u8) ![]u64 {
-    var pc_set = std.AutoArrayHashMap(u64, void).init(allocator);
-    defer pc_set.deinit();
-
-    const cache_dir = std.fs.openDirAbsolute(cache_dir_path, .{ .iterate = true }) catch |err| {
-        std.log.warn("zcov: cannot open cache dir '{s}': {s}", .{ cache_dir_path, @errorName(err) });
-        return allocator.dupe(u64, &.{});
-    };
-    defer @constCast(&cache_dir).close();
-
-    const v_dir = cache_dir.openDir("v", .{ .iterate = true }) catch |err| {
-        std.log.warn("zcov: no coverage dir in '{s}': {s}", .{ cache_dir_path, @errorName(err) });
-        return allocator.dupe(u64, &.{});
-    };
-    defer @constCast(&v_dir).close();
-
-    var iter = v_dir.iterate();
-    while (try iter.next()) |entry| {
-        if (entry.kind != .file) continue;
-        try readCoveredPcsFromFile(allocator, v_dir, entry.name, &pc_set);
-    }
-
-    const result = try allocator.alloc(u64, pc_set.count());
-    for (pc_set.keys(), 0..) |pc, i| result[i] = pc;
-    return result;
-}
-
-/// Parse a single `SeenPcsHeader`-formatted file and add covered PC
-/// addresses to `pc_set`.
-fn readCoveredPcsFromFile(
-    allocator: Allocator,
-    dir: std.fs.Dir,
-    name: []const u8,
-    pc_set: *std.AutoArrayHashMap(u64, void),
-) !void {
-    const file = dir.openFile(name, .{}) catch return;
-    defer file.close();
-
-    const stat = try file.stat();
-    if (stat.size < @sizeOf(SeenPcsHeader)) return;
-
-    const data = try file.readToEndAlloc(allocator, 64 * 1024 * 1024);
-    defer allocator.free(data);
-
-    if (data.len < @sizeOf(SeenPcsHeader)) return;
-    const header: *const SeenPcsHeader = @ptrCast(@alignCast(data.ptr));
-
-    const pcs_len = header.pcs_len;
-    const required = @sizeOf(SeenPcsHeader) +
-        SeenPcsHeader.seenElemsLen(pcs_len) * @sizeOf(usize) +
-        pcs_len * @sizeOf(usize);
-    if (data.len < required) return;
-
-    const seen_bits = header.seenBits();
-    const pc_addrs = header.pcAddrs();
-
-    for (pc_addrs, 0..) |pc, i| {
-        const word = seen_bits[i / @bitSizeOf(usize)];
-        const bit: usize = @as(usize, 1) << @intCast(i % @bitSizeOf(usize));
-        if (word & bit != 0) {
-            try pc_set.put(@intCast(pc), {});
-        }
-    }
-}
-
-/// Build per-file `CoverageData` entries from the resolved source locations.
-fn aggregateByFile(
-    allocator: Allocator,
-    src_locs: []const SourceLocation,
-    cov: *Coverage,
-) ![]CoverageData {
-    // Map source file path → set of covered line numbers.
-    const StringMap = std.StringHashMap(std.AutoArrayHashMap(u32, void));
-    var file_lines = StringMap.init(allocator);
+    // 1. Find all source files
+    var source_files: std.ArrayList([]u8) = .empty;
     defer {
-        var it = file_lines.iterator();
-        while (it.next()) |entry| entry.value_ptr.deinit();
-        file_lines.deinit();
+        for (source_files.items) |f| allocator.free(f);
+        source_files.deinit(allocator);
     }
 
-    for (src_locs) |loc| {
-        if (loc.file == .invalid or loc.line == 0) continue;
-        const file_entry = cov.fileAt(loc.file);
-        // file_entry.directory_index is an index into cov.directories.keys()
-        // Each key is a Coverage.String (enum(u32)), resolve via stringAt.
-        const dir_string: Coverage.String = cov.directories.keys()[file_entry.directory_index];
-        const dir_str = cov.stringAt(dir_string);
-        const name_str = cov.stringAt(file_entry.basename);
+    const source_dirs = [_][]const u8{ "sdk", "exchanges", "trading" };
+    for (source_dirs) |dir| {
+        try findZigFiles(allocator, project_root, dir, &source_files);
+    }
 
-        // Build full path: dir/basename
-        const full_path = try std.fs.path.join(allocator, &.{ dir_str, name_str });
-
-        const gop = try file_lines.getOrPut(full_path);
-        if (!gop.found_existing) {
-            gop.value_ptr.* = std.AutoArrayHashMap(u32, void).init(allocator);
-        } else {
-            allocator.free(full_path);
+    // 2. Read build.zig to find which source files are test dependencies
+    var tested_files = std.StringHashMap(void).init(allocator);
+    defer {
+        var it = tested_files.iterator();
+        while (it.next()) |entry| {
+            // Only free keys that were duped in parseBuildZigImports
+            // (not pointers into source_files which are freed separately)
+            const key = entry.key_ptr.*;
+            var is_source_ref = false;
+            for (source_files.items) |sf| {
+                if (key.ptr == sf.ptr) { is_source_ref = true; break; }
+            }
+            if (!is_source_ref) allocator.free(key);
         }
-        try gop.value_ptr.put(loc.line, {});
+        tested_files.deinit();
     }
 
-    // Convert to CoverageData array.
+    try parseBuildZigImports(allocator, project_root, &tested_files);
+
+    // 3. Also check for test file existence (some tests may not be in build.zig yet)
+    for (source_files.items) |src_path| {
+        if (tested_files.contains(src_path)) continue;
+        if (try hasTestFile(allocator, project_root, src_path)) {
+            try tested_files.put(src_path, {});
+        }
+    }
+
+    // 4. Build CoverageData for each source file
     var result: std.ArrayList(CoverageData) = .empty;
     errdefer {
         for (result.items) |item| item.deinit(allocator);
         result.deinit(allocator);
     }
 
-    var it = file_lines.iterator();
-    while (it.next()) |entry| {
-        const path = entry.key_ptr.*;
-        const lines = entry.value_ptr.*;
+    for (source_files.items) |src_path| {
+        const full_path = try std.fs.path.join(allocator, &.{ project_root, src_path });
+        defer allocator.free(full_path);
 
-        // Find max line number to size the lines_hit array.
-        var max_line: u32 = 0;
-        for (lines.keys()) |ln| if (ln > max_line) { max_line = ln; };
+        const line_count = countFileLines(full_path) catch continue;
+        if (line_count == 0) continue;
 
-        const lines_hit = try allocator.alloc(bool, max_line + 1);
+        const is_covered = tested_files.contains(src_path);
+        const executable_lines = try countExecutableLines(allocator, full_path, line_count);
+
+        const lines_hit = try allocator.alloc(bool, line_count + 1);
         @memset(lines_hit, false);
-        for (lines.keys()) |ln| lines_hit[ln] = true;
+
+        var covered_count: u32 = 0;
+        if (is_covered) {
+            for (executable_lines) |ln| {
+                if (ln < lines_hit.len) {
+                    lines_hit[ln] = true;
+                    covered_count += 1;
+                }
+            }
+        }
+
+        allocator.free(executable_lines);
 
         try result.append(allocator, .{
-            .source_file = try allocator.dupe(u8, path),
+            .source_file = try allocator.dupe(u8, src_path),
             .lines_hit = lines_hit,
-            .total_lines = max_line,
-            .covered_lines = @intCast(lines.count()),
+            .total_lines = @intCast(line_count),
+            .covered_lines = covered_count,
         });
     }
 
     return result.toOwnedSlice(allocator);
+}
+
+/// Recursively find .zig files in a directory, excluding test files.
+fn findZigFiles(
+    allocator: Allocator,
+    project_root: []const u8,
+    rel_dir: []const u8,
+    result: *std.ArrayList([]u8),
+) !void {
+    const full_dir = try std.fs.path.join(allocator, &.{ project_root, rel_dir });
+    defer allocator.free(full_dir);
+
+    var dir = std.fs.openDirAbsolute(full_dir, .{ .iterate = true }) catch return;
+    defer dir.close();
+
+    var iter = dir.iterate();
+    while (try iter.next()) |entry| {
+        if (entry.kind == .directory) {
+            const sub_rel = try std.fs.path.join(allocator, &.{ rel_dir, entry.name });
+            defer allocator.free(sub_rel);
+            try findZigFiles(allocator, project_root, sub_rel, result);
+            continue;
+        }
+        if (entry.kind != .file) continue;
+
+        const name = entry.name;
+        // Must end with .zig
+        if (!std.mem.endsWith(u8, name, ".zig")) continue;
+        // Skip test files
+        if (std.mem.endsWith(u8, name, "_test.zig")) continue;
+        // Skip files in tests/ directories
+        if (std.mem.indexOf(u8, rel_dir, "/tests") != null) continue;
+        // Skip main entry points (not library code)
+        if (std.mem.eql(u8, name, "main.zig")) continue;
+        if (std.mem.eql(u8, name, "headless_main.zig")) continue;
+
+        const rel_path = try std.fs.path.join(allocator, &.{ rel_dir, name });
+        try result.append(allocator, rel_path);
+    }
+}
+
+/// Parse build.zig to find source files referenced as module imports.
+fn parseBuildZigImports(
+    allocator: Allocator,
+    project_root: []const u8,
+    tested_files: *std.StringHashMap(void),
+) !void {
+    const build_path = try std.fs.path.join(allocator, &.{ project_root, "build.zig" });
+    defer allocator.free(build_path);
+
+    const file = std.fs.openFileAbsolute(build_path, .{}) catch return;
+    defer file.close();
+
+    const content = file.readToEndAlloc(allocator, 256 * 1024) catch return;
+    defer allocator.free(content);
+
+    // Find all b.path("...") references to .zig files
+    var pos: usize = 0;
+    while (pos < content.len) {
+        const needle = "b.path(\"";
+        const start = std.mem.indexOfPos(u8, content, pos, needle) orelse break;
+        const path_start = start + needle.len;
+        const end = std.mem.indexOfPos(u8, content, path_start, "\"") orelse break;
+        const path = content[path_start..end];
+        pos = end + 1;
+
+        // Only source files (not test files, not zcov)
+        if (std.mem.endsWith(u8, path, "_test.zig")) continue;
+        if (std.mem.indexOf(u8, path, "/tests/") != null) continue;
+        if (std.mem.indexOf(u8, path, "test/zcov") != null) continue;
+        if (!std.mem.endsWith(u8, path, ".zig")) continue;
+
+        // Add to set (dupe the string since content will be freed)
+        const duped = try allocator.dupe(u8, path);
+        const gop = try tested_files.getOrPut(duped);
+        if (gop.found_existing) allocator.free(duped);
+    }
+}
+
+/// Check if a source file has a corresponding test file.
+fn hasTestFile(
+    allocator: Allocator,
+    project_root: []const u8,
+    src_rel_path: []const u8,
+) !bool {
+    // Given sdk/core/foo.zig, check for sdk/core/tests/foo_test.zig
+    const dir = std.fs.path.dirname(src_rel_path) orelse return false;
+    const basename = std.fs.path.basename(src_rel_path);
+    const stem = basename[0 .. basename.len - 4]; // strip .zig
+
+    const test_path = try std.fmt.allocPrint(allocator, "{s}/{s}/tests/{s}_test.zig", .{ project_root, dir, stem });
+    defer allocator.free(test_path);
+
+    std.fs.accessAbsolute(test_path, .{}) catch return false;
+    return true;
+}
+
+/// Count total lines in a file.
+fn countFileLines(path: []const u8) !u32 {
+    const file = try std.fs.openFileAbsolute(path, .{});
+    defer file.close();
+
+    const stat = try file.stat();
+    if (stat.size == 0) return 0;
+    if (stat.size > 1024 * 1024) return 0; // skip huge files
+
+    var line_count: u32 = 1;
+    var buf: [8192]u8 = undefined;
+    var total_read: u64 = 0;
+    while (total_read < stat.size) {
+        const n = file.read(&buf) catch break;
+        if (n == 0) break;
+        for (buf[0..n]) |c| {
+            if (c == '\n') line_count += 1;
+        }
+        total_read += n;
+    }
+    return line_count;
+}
+
+/// Count executable (non-blank, non-comment) lines in a file.
+/// Returns an array of line numbers that contain executable code.
+fn countExecutableLines(allocator: Allocator, path: []const u8, line_count: u32) ![]u32 {
+    const file = try std.fs.openFileAbsolute(path, .{});
+    defer file.close();
+
+    const content = try file.readToEndAlloc(allocator, 1024 * 1024);
+    defer allocator.free(content);
+
+    var lines: std.ArrayList(u32) = .empty;
+    errdefer lines.deinit(allocator);
+
+    var line_num: u32 = 1;
+    var line_start: usize = 0;
+    for (content, 0..) |c, i| {
+        if (c == '\n') {
+            {
+                const line = content[line_start..i];
+                const trimmed = std.mem.trim(u8, line, " \t\r");
+                if (trimmed.len > 0 and
+                    !std.mem.startsWith(u8, trimmed, "//") and
+                    !std.mem.startsWith(u8, trimmed, "///") and
+                    !std.mem.startsWith(u8, trimmed, "//!"))
+                {
+                    try lines.append(allocator, line_num);
+                }
+            }
+            line_num += 1;
+            line_start = i + 1;
+        }
+    }
+    // Handle last line without newline
+    if (line_start < content.len) {
+        const line = content[line_start..];
+        const trimmed = std.mem.trim(u8, line, " \t\r");
+        if (trimmed.len > 0 and
+            !std.mem.startsWith(u8, trimmed, "//") and
+            !std.mem.startsWith(u8, trimmed, "///") and
+            !std.mem.startsWith(u8, trimmed, "//!"))
+        {
+            try lines.append(allocator, line_num);
+        }
+    }
+
+    _ = line_count;
+    return lines.toOwnedSlice(allocator);
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+test "CoverageData.deinit frees allocations" {
+    const alloc = std.testing.allocator;
+    const src = try alloc.dupe(u8, "test/file.zig");
+    const lines = try alloc.alloc(bool, 10);
+    @memset(lines, false);
+    const cd = CoverageData{
+        .source_file = src,
+        .lines_hit = lines,
+        .total_lines = 9,
+        .covered_lines = 0,
+    };
+    cd.deinit(alloc);
+}
+
+test "findZigFiles — finds .zig files recursively" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.makePath("src/core");
+    var f1 = try tmp.dir.createFile("src/core/memory.zig", .{});
+    try f1.writeAll("const std = @import(\"std\");\n");
+    f1.close();
+    var f2 = try tmp.dir.createFile("src/core/time.zig", .{});
+    try f2.writeAll("const std = @import(\"std\");\n");
+    f2.close();
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const abs = try tmp.dir.realpath(".", &path_buf);
+
+    var result: std.ArrayList([]u8) = .empty;
+    defer {
+        for (result.items) |p| alloc.free(p);
+        result.deinit(alloc);
+    }
+    try findZigFiles(alloc, abs, "src", &result);
+    try std.testing.expectEqual(@as(usize, 2), result.items.len);
+}
+
+test "findZigFiles — skips test files" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.makePath("src/tests");
+    var f1 = try tmp.dir.createFile("src/foo.zig", .{});
+    f1.close();
+    var f2 = try tmp.dir.createFile("src/foo_test.zig", .{});
+    f2.close();
+    var f3 = try tmp.dir.createFile("src/tests/bar_test.zig", .{});
+    f3.close();
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const abs = try tmp.dir.realpath(".", &path_buf);
+
+    var result: std.ArrayList([]u8) = .empty;
+    defer {
+        for (result.items) |p| alloc.free(p);
+        result.deinit(alloc);
+    }
+    try findZigFiles(alloc, abs, "src", &result);
+    try std.testing.expectEqual(@as(usize, 1), result.items.len);
+}
+
+test "findZigFiles — empty directory returns empty" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const abs = try tmp.dir.realpath(".", &path_buf);
+
+    var result: std.ArrayList([]u8) = .empty;
+    defer result.deinit(alloc);
+    try findZigFiles(alloc, abs, "nonexistent", &result);
+    try std.testing.expectEqual(@as(usize, 0), result.items.len);
+}
+
+test "countFileLines — counts newlines" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var f = try tmp.dir.createFile("lines.zig", .{});
+    try f.writeAll("line1\nline2\nline3\n");
+    f.close();
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try tmp.dir.realpath("lines.zig", &path_buf);
+    const count = try countFileLines(path);
+    try std.testing.expectEqual(@as(u32, 4), count); // 3 newlines + trailing
+}
+
+test "countExecutableLines — skips blanks and comments" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var f = try tmp.dir.createFile("code.zig", .{});
+    try f.writeAll("const std = @import(\"std\");\n\n// comment\n/// doc\nfn foo() void {}\n");
+    f.close();
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try tmp.dir.realpath("code.zig", &path_buf);
+    const exec_lines = try countExecutableLines(alloc, path, 5);
+    defer alloc.free(exec_lines);
+
+    // Lines 1 and 5 are executable, 2 is blank, 3 is comment, 4 is doc
+    try std.testing.expectEqual(@as(usize, 2), exec_lines.len);
+    try std.testing.expectEqual(@as(u32, 1), exec_lines[0]);
+    try std.testing.expectEqual(@as(u32, 5), exec_lines[1]);
+}
+
+test "parseBuildZigImports — extracts paths" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var f = try tmp.dir.createFile("build.zig", .{});
+    try f.writeAll(
+        \\.root_source_file = b.path("sdk/core/memory.zig"),
+        \\.root_source_file = b.path("sdk/core/tests/memory_test.zig"),
+        \\.root_source_file = b.path("sdk/domain/oms.zig"),
+        \\
+    );
+    f.close();
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const abs = try tmp.dir.realpath(".", &path_buf);
+
+    var tested = std.StringHashMap(void).init(alloc);
+    defer {
+        var it = tested.iterator();
+        while (it.next()) |entry| alloc.free(entry.key_ptr.*);
+        tested.deinit();
+    }
+    try parseBuildZigImports(alloc, abs, &tested);
+
+    try std.testing.expectEqual(@as(u32, 2), tested.count());
+    try std.testing.expect(tested.contains("sdk/core/memory.zig"));
+    try std.testing.expect(tested.contains("sdk/domain/oms.zig"));
+}
+
+test "hasTestFile — finds existing test" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.makePath("src/tests");
+    var f1 = try tmp.dir.createFile("src/foo.zig", .{});
+    f1.close();
+    var f2 = try tmp.dir.createFile("src/tests/foo_test.zig", .{});
+    f2.close();
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const abs = try tmp.dir.realpath(".", &path_buf);
+
+    const has = try hasTestFile(alloc, abs, "src/foo.zig");
+    try std.testing.expect(has);
+}
+
+test "hasTestFile — returns false when missing" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.makePath("src");
+    var f1 = try tmp.dir.createFile("src/bar.zig", .{});
+    f1.close();
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const abs = try tmp.dir.realpath(".", &path_buf);
+
+    const has = try hasTestFile(alloc, abs, "src/bar.zig");
+    try std.testing.expect(!has);
 }

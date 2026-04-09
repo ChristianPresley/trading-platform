@@ -38,14 +38,13 @@ test "file starts and ends with PAR1 magic bytes" {
     defer file.close();
 
     var header: [4]u8 = undefined;
-    _ = try file.read(&header);
+    _ = try file.preadAll( &header, 0);
     try std.testing.expectEqualStrings("PAR1", &header);
 
     // Read last 4 bytes
     const stat = try file.stat();
-    try file.seekTo(stat.size - 4);
     var footer_magic: [4]u8 = undefined;
-    _ = try file.read(&footer_magic);
+    _ = try file.preadAll( &footer_magic, stat.size - 4);
     try std.testing.expectEqualStrings("PAR1", &footer_magic);
 }
 
@@ -76,13 +75,12 @@ test "empty row group is valid" {
     defer file.close();
 
     var header: [4]u8 = undefined;
-    _ = try file.read(&header);
+    _ = try file.preadAll( &header, 0);
     try std.testing.expectEqualStrings("PAR1", &header);
 
     const stat = try file.stat();
-    try file.seekTo(stat.size - 4);
     var footer_magic: [4]u8 = undefined;
-    _ = try file.read(&footer_magic);
+    _ = try file.preadAll( &footer_magic, stat.size - 4);
     try std.testing.expectEqualStrings("PAR1", &footer_magic);
 }
 
@@ -112,9 +110,8 @@ test "footer length field is written" {
     const stat = try file.stat();
     // Format: [PAR1 4B][footer][footer_len 4B][PAR1 4B]
     // Footer length is at bytes [size-8 .. size-4]
-    try file.seekTo(stat.size - 8);
     var footer_len_bytes: [4]u8 = undefined;
-    _ = try file.read(&footer_len_bytes);
+    _ = try file.preadAll( &footer_len_bytes, stat.size - 8);
     const footer_len = std.mem.readInt(u32, &footer_len_bytes, .little);
     // Footer length must be positive (schema has at least 1 column)
     try std.testing.expect(footer_len > 0);
@@ -159,11 +156,10 @@ test "column data round-trip via page header" {
 
     // Verify PAR1 bookends
     var hdr: [4]u8 = undefined;
-    _ = try file.read(&hdr);
+    _ = try file.preadAll( &hdr, 0);
     try std.testing.expectEqualStrings("PAR1", &hdr);
 
-    try file.seekTo(stat.size - 4);
     var ftr: [4]u8 = undefined;
-    _ = try file.read(&ftr);
+    _ = try file.preadAll( &ftr, stat.size - 4);
     try std.testing.expectEqualStrings("PAR1", &ftr);
 }
