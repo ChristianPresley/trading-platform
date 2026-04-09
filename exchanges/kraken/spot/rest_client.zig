@@ -138,7 +138,7 @@ pub const SpotRestClient = struct {
 
         // Collect pair names from the result object keys
         const k = result.object.keys();
-        var pair_list: std.ArrayList([]const u8) = .{};
+        var pair_list: std.ArrayList([]const u8) = .empty;
         errdefer {
             for (pair_list.items) |p| self.allocator.free(p);
             pair_list.deinit(self.allocator);
@@ -457,7 +457,7 @@ pub const SpotRestClient = struct {
         const descr_val = result.object.get("descr") orelse return error.MissingField;
         const order_descr = descr_val.object.get("order") orelse return error.MissingField;
 
-        var txids_list: std.ArrayList([]const u8) = .{};
+        var txids_list: std.ArrayList([]const u8) = .empty;
         errdefer {
             for (txids_list.items) |t| self.allocator.free(t);
             txids_list.deinit(self.allocator);

@@ -243,7 +243,7 @@ test "error: nesting too deep" {
     var parser = json.JsonParser.init(std.testing.allocator);
     defer parser.deinit();
     // Build 101 levels of nesting
-    var deep: std.ArrayList(u8) = .{};
+    var deep: std.ArrayList(u8) = .empty;
     defer deep.deinit(std.testing.allocator);
     for (0..101) |_| try deep.append(std.testing.allocator, '[');
     try deep.append(std.testing.allocator, '1');

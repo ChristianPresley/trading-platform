@@ -51,7 +51,7 @@ pub fn parseResponse(allocator: std.mem.Allocator, data: []const u8) !Response {
     const status_code = std.fmt.parseInt(u16, code_str, 10) catch return error.InvalidStatusCode;
 
     // Parse headers
-    var headers_list: std.ArrayList(Header) = .{};
+    var headers_list: std.ArrayList(Header) = .empty;
     errdefer {
         for (headers_list.items) |h| {
             allocator.free(h.name);
@@ -119,53 +119,65 @@ pub fn formatRequest(
     body: ?[]const u8,
     buf: []u8,
 ) !usize {
-    var stream = std.io.fixedBufferStream(buf);
-    const writer = stream.writer();
+    var pos: usize = 0;
+
+    // Helper to append a slice to buf
+    const append = struct {
+        fn f(b: []u8, p: *usize, data: []const u8) !void {
+            if (p.* + data.len > b.len) return error.NoSpaceLeft;
+            @memcpy(b[p.* .. p.* + data.len], data);
+            p.* += data.len;
+        }
+    }.f;
 
     // Request line
-    const path = if (url.query) |q| blk: {
-        _ = q;
-        break :blk url.path; // simplified: caller should pre-combine path?query
-    } else url.path;
-
-    try writer.print("{s} {s}", .{ method, path });
+    try append(buf, &pos, method);
+    try append(buf, &pos, " ");
+    try append(buf, &pos, url.path);
     if (url.query) |q| {
-        try writer.print("?{s}", .{q});
+        try append(buf, &pos, "?");
+        try append(buf, &pos, q);
     }
-    try writer.writeAll(" HTTP/1.1\r\n");
+    try append(buf, &pos, " HTTP/1.1\r\n");
 
     // Host header
-    try writer.print("Host: {s}", .{url.host});
+    try append(buf, &pos, "Host: ");
+    try append(buf, &pos, url.host);
     if ((std.mem.eql(u8, url.scheme, "http") and url.port != 80) or
         (std.mem.eql(u8, url.scheme, "https") and url.port != 443))
     {
-        try writer.print(":{d}", .{url.port});
+        const port_str = std.fmt.bufPrint(buf[pos..], ":{d}", .{url.port}) catch return error.NoSpaceLeft;
+        pos += port_str.len;
     }
-    try writer.writeAll("\r\n");
+    try append(buf, &pos, "\r\n");
 
     // Standard headers
-    try writer.writeAll("Connection: keep-alive\r\n");
-    try writer.writeAll("User-Agent: trading-platform/1.0\r\n");
-    try writer.writeAll("Accept: application/json\r\n");
+    try append(buf, &pos, "Connection: keep-alive\r\n");
+    try append(buf, &pos, "User-Agent: trading-platform/1.0\r\n");
+    try append(buf, &pos, "Accept: application/json\r\n");
 
     // Body length
     if (body) |b| {
-        try writer.print("Content-Length: {d}\r\n", .{b.len});
+        const cl_str = std.fmt.bufPrint(buf[pos..], "Content-Length: {d}\r\n", .{b.len}) catch return error.NoSpaceLeft;
+        pos += cl_str.len;
     }
 
     // Extra headers
     for (extra_headers) |h| {
-        try writer.print("{s}: {s}\r\n", .{ h.name, h.value });
+        try append(buf, &pos, h.name);
+        try append(buf, &pos, ": ");
+        try append(buf, &pos, h.value);
+        try append(buf, &pos, "\r\n");
     }
 
-    try writer.writeAll("\r\n");
+    try append(buf, &pos, "\r\n");
 
     // Body
     if (body) |b| {
-        try writer.writeAll(b);
+        try append(buf, &pos, b);
     }
 
-    return stream.pos;
+    return pos;
 }
 
 const PooledConnection = struct {
@@ -198,6 +210,18 @@ pub const HttpClient = struct {
             if (!conn.in_use and std.mem.eql(u8, conn.host, host) and conn.port == port) {
                 conn.in_use = true;
                 return conn.socket;
+            }
+        }
+
+        // Evict an idle connection if pool is at capacity
+        if (self.connections.items.len >= self.max_pool_size) {
+            for (self.connections.items, 0..) |*conn, i| {
+                if (!conn.in_use) {
+                    std.posix.close(conn.socket);
+                    self.allocator.free(conn.host);
+                    _ = self.connections.swapRemove(self.allocator, i);
+                    break;
+                }
             }
         }
 

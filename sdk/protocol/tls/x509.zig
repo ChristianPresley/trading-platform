@@ -329,7 +329,7 @@ pub fn parse(allocator: std.mem.Allocator, der: []const u8) !Certificate {
                         const san_seq_content = san_p.readTlv(TAG_SEQUENCE) catch continue;
                         var san_seq = DerParser.init(san_seq_content);
 
-                        var dns_list: std.ArrayList([]const u8) = .{};
+                        var dns_list: std.ArrayList([]const u8) = .empty;
                         while (san_seq.remaining() > 0) {
                             const gn = san_seq.readTlvAnyTag() catch break;
                             // dNSName [2] IMPLICIT IA5String
@@ -409,7 +409,11 @@ pub fn verifyChain(
 ) VerifyError!void {
     if (chain.len == 0) return error.ChainTooShort;
 
-    const now = std.time.timestamp();
+    const now = blk: {
+        var ts_: std.os.linux.timespec = undefined;
+        _ = std.os.linux.clock_gettime(.REALTIME, &ts_);
+        break :blk ts_.sec;
+    };
     const leaf = &chain[0];
 
     // Hostname check

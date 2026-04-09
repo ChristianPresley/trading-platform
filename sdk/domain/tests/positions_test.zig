@@ -29,8 +29,30 @@ fn makeFill(side: Side, qty: i64, price: i64, ts: u128) Fill {
     };
 }
 
+fn makeBtcFill(side: Side, qty: i64, price: i64, ts: u128) Fill {
+    return .{
+        .instrument = "BTC-USD",
+        .side = side,
+        .quantity = qty,
+        .price = price,
+        .timestamp = ts,
+        .account = "ACC1",
+        .currency = "USD",
+        .settlement_date = 20240101,
+    };
+}
+
+fn makeBtcKey() PositionKey {
+    return .{
+        .account = "ACC1",
+        .instrument = "BTC-USD",
+        .settlement_date = 20240101,
+        .currency = "USD",
+    };
+}
+
 test "FIFO: buy 100@10, buy 100@12, sell 150 → correct realized P&L" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -61,7 +83,7 @@ test "FIFO: buy 100@10, buy 100@12, sell 150 → correct realized P&L" {
 }
 
 test "LIFO: buy 100@10, buy 100@12, sell 150 → different P&L than FIFO" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -84,7 +106,7 @@ test "LIFO: buy 100@10, buy 100@12, sell 150 → different P&L than FIFO" {
 }
 
 test "average cost: buy 100@10, buy 100@12, sell 150" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -107,7 +129,7 @@ test "average cost: buy 100@10, buy 100@12, sell 150" {
 }
 
 test "flat position after equal buy/sell" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -129,7 +151,7 @@ test "flat position after equal buy/sell" {
 }
 
 test "unrealized P&L at mark price" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -149,7 +171,7 @@ test "unrealized P&L at mark price" {
 }
 
 test "multi-currency: separate positions for USD and EUR" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -205,7 +227,7 @@ test "multi-currency: separate positions for USD and EUR" {
 }
 
 test "position crosses zero: long to short" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -227,4 +249,126 @@ test "position crosses zero: long to short" {
     try std.testing.expectEqual(@as(i64, -50), pos.?.quantity);
     // Realized on 100: (12-10)*100 = 200
     try std.testing.expectEqual(@as(i64, 200), pos.?.realized_pnl);
+}
+
+// --- i64 overflow regression tests (BTC-scale prices) ---
+// Prices stored as integer cents: BTC ~$100k = 10_000_000 (1e7).
+// price * quantity can exceed i64 max (9.2e18) with moderate size.
+
+test "no overflow: avg cost with BTC-scale prices" {
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var pm = try PositionManager.init(allocator, .{
+        .cost_basis_method = .average_cost,
+        .base_currency = "USD",
+    });
+    defer pm.deinit();
+
+    // BTC at $100,000.00 = 10_000_000 price units, qty 500
+    // price * qty = 5_000_000_000 per lot — accumulates across lots
+    try pm.onFill(makeBtcFill(.buy, 500, 10_000_000, 1));
+    try pm.onFill(makeBtcFill(.buy, 500, 10_200_000, 2));
+
+    const key = makeBtcKey();
+    const pos = pm.getPosition(key);
+    try std.testing.expect(pos != null);
+    try std.testing.expectEqual(@as(i64, 1000), pos.?.quantity);
+    // avg = (500*10_000_000 + 500*10_200_000) / 1000 = 10_100_000
+    try std.testing.expectEqual(@as(i64, 10_100_000), pos.?.avg_cost);
+}
+
+test "no overflow: realized P&L with BTC-scale prices (avg cost)" {
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var pm = try PositionManager.init(allocator, .{
+        .cost_basis_method = .average_cost,
+        .base_currency = "USD",
+    });
+    defer pm.deinit();
+
+    try pm.onFill(makeBtcFill(.buy, 500, 10_000_000, 1));
+    try pm.onFill(makeBtcFill(.buy, 500, 10_200_000, 2));
+    // Sell 800 @ 10_500_000 — avg cost is 10_100_000
+    // pnl = 800 * (10_500_000 - 10_100_000) = 800 * 400_000 = 320_000_000
+    try pm.onFill(makeBtcFill(.sell, 800, 10_500_000, 3));
+
+    const key = makeBtcKey();
+    const rpnl = pm.realizedPnl(key);
+    try std.testing.expect(rpnl != null);
+    try std.testing.expectEqual(@as(i64, 320_000_000), rpnl.?);
+}
+
+test "no overflow: realized P&L with BTC-scale prices (FIFO)" {
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var pm = try PositionManager.init(allocator, .{
+        .cost_basis_method = .fifo,
+        .base_currency = "USD",
+    });
+    defer pm.deinit();
+
+    try pm.onFill(makeBtcFill(.buy, 500, 10_000_000, 1));
+    try pm.onFill(makeBtcFill(.buy, 500, 10_200_000, 2));
+    // Sell 800 @ 10_500_000
+    // FIFO: 500*(10_500_000-10_000_000) + 300*(10_500_000-10_200_000)
+    //     = 500*500_000 + 300*300_000 = 250_000_000 + 90_000_000 = 340_000_000
+    try pm.onFill(makeBtcFill(.sell, 800, 10_500_000, 3));
+
+    const key = makeBtcKey();
+    const rpnl = pm.realizedPnl(key);
+    try std.testing.expect(rpnl != null);
+    try std.testing.expectEqual(@as(i64, 340_000_000), rpnl.?);
+}
+
+test "no overflow: unrealized P&L with BTC-scale prices" {
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var pm = try PositionManager.init(allocator, .{
+        .cost_basis_method = .average_cost,
+        .base_currency = "USD",
+    });
+    defer pm.deinit();
+
+    try pm.onFill(makeBtcFill(.buy, 1000, 10_000_000, 1));
+
+    const key = makeBtcKey();
+    // Mark at $105k = 10_500_000; upnl = (10_500_000 - 10_000_000) * 1000 = 500_000_000
+    const upnl = pm.unrealizedPnl(key, 10_500_000);
+    try std.testing.expect(upnl != null);
+    try std.testing.expectEqual(@as(i64, 500_000_000), upnl.?);
+}
+
+test "no overflow: many lots accumulating large total cost" {
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var pm = try PositionManager.init(allocator, .{
+        .cost_basis_method = .average_cost,
+        .base_currency = "USD",
+    });
+    defer pm.deinit();
+
+    // 20 fills of 1000 qty @ ~10M price each
+    // total_cost per lot = 10_000_000 * 1000 = 10_000_000_000 (10B)
+    // 20 lots → cumulative = 200_000_000_000 — exceeds i64 max without i128
+    for (0..20) |i| {
+        const price: i64 = 10_000_000 + @as(i64, @intCast(i)) * 10_000;
+        try pm.onFill(makeBtcFill(.buy, 1000, price, @as(u128, i) + 1));
+    }
+
+    const key = makeBtcKey();
+    const pos = pm.getPosition(key);
+    try std.testing.expect(pos != null);
+    try std.testing.expectEqual(@as(i64, 20_000), pos.?.quantity);
+    // avg cost should be close to 10_095_000 (mean of 10M..10.19M)
+    try std.testing.expect(pos.?.avg_cost >= 10_090_000 and pos.?.avg_cost <= 10_100_000);
 }

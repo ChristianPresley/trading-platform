@@ -5,17 +5,21 @@ pub const Timestamp = struct {
 
     /// Reads CLOCK_MONOTONIC_RAW
     pub fn now() Timestamp {
-        const ts = std.posix.clock_gettime(std.posix.CLOCK.MONOTONIC) catch unreachable;
+        var ts: std.os.linux.timespec = undefined;
+        const rc = std.os.linux.clock_gettime(.MONOTONIC, &ts);
+        if (rc != 0) unreachable;
         return fromTimespec(ts);
     }
 
     /// Reads CLOCK_REALTIME
     pub fn wallClock() Timestamp {
-        const ts = std.posix.clock_gettime(std.posix.CLOCK.REALTIME) catch unreachable;
+        var ts: std.os.linux.timespec = undefined;
+        const rc = std.os.linux.clock_gettime(.REALTIME, &ts);
+        if (rc != 0) unreachable;
         return fromTimespec(ts);
     }
 
-    fn fromTimespec(ts: std.posix.timespec) Timestamp {
+    fn fromTimespec(ts: std.os.linux.timespec) Timestamp {
         const secs: u128 = @intCast(ts.sec);
         const nanos: u128 = @intCast(ts.nsec);
         return .{ .nanos = secs * 1_000_000_000 + nanos };

@@ -10,8 +10,10 @@ const UserCommand = msg.UserCommand;
 const OrderbookSnapshot = msg.OrderbookSnapshot;
 const PositionUpdate = msg.PositionUpdate;
 const OrderUpdate = msg.OrderUpdate;
+const TradeUpdate = msg.TradeUpdate;
 const StatusUpdate = msg.StatusUpdate;
 const CandleUpdate = msg.CandleUpdate;
+const FootprintUpdate = msg.FootprintUpdate;
 const Engine = @import("engine.zig").Engine;
 const input_mod = @import("input.zig");
 const InputHandler = input_mod.InputHandler;
@@ -21,6 +23,7 @@ const orderbook_panel = @import("panels/orderbook_panel.zig");
 const positions_panel = @import("panels/positions_panel.zig");
 const chart_panel = @import("panels/chart_panel.zig");
 const orders_panel = @import("panels/orders_panel.zig");
+const trade_tape_panel = @import("panels/trade_tape_panel.zig");
 const status_panel = @import("panels/status_panel.zig");
 const order_entry_panel_mod = @import("panels/order_entry_panel.zig");
 const OrderEntryPanel = order_entry_panel_mod.OrderEntryPanel;
@@ -28,6 +31,7 @@ const theme_mod = @import("theme.zig");
 
 const MAX_POSITIONS = 16;
 const MAX_ORDERS = 64;
+const NUM_INSTRUMENTS = 8;
 
 // Panel indices (positions panel removed from tab cycle — accessed via 'p' overlay)
 const PANEL_ORDERBOOK = 0;
@@ -35,14 +39,14 @@ const PANEL_ORDER_ENTRY = 1;
 const PANEL_RECENT_ORDERS = 2;
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
     var term = Terminal.init() catch |err| {
         if (err == error.NotATerminal) {
-            const stdout = std.fs.File.stdout().deprecatedWriter();
-            try stdout.print("Trading Desk v0.1.0\n", .{});
+            const banner = "Trading Desk v0.1.0\n";
+            _ = std.os.linux.write(std.posix.STDOUT_FILENO, banner, banner.len);
             return;
         }
         return err;
@@ -50,7 +54,7 @@ pub fn main() !void {
     defer term.deinit();
 
     // Allocate ring buffers
-    var to_tui = try SpscRingBuffer(EngineEvent).init(allocator, 256);
+    var to_tui = try SpscRingBuffer(EngineEvent).init(allocator, 4096);
     defer to_tui.deinit();
     var from_tui = try SpscRingBuffer(UserCommand).init(allocator, 256);
     defer from_tui.deinit();
@@ -67,26 +71,31 @@ pub fn main() !void {
     defer renderer.deinit();
 
     // TUI state
-    var orderbook_snap = [_]OrderbookSnapshot{std.mem.zeroes(OrderbookSnapshot)} ** 2;
+    var orderbook_snap = [_]OrderbookSnapshot{std.mem.zeroes(OrderbookSnapshot)} ** NUM_INSTRUMENTS;
     var active_instrument: usize = 0;
     var positions_buf: [MAX_POSITIONS]PositionUpdate = undefined;
     var positions_count: usize = 0;
     var orders_buf: [MAX_ORDERS]OrderUpdate = undefined;
     var orders_count: usize = 0;
+    const MAX_TAPE = trade_tape_panel.MAX_TAPE_ENTRIES;
+    var tape_buf: [MAX_TAPE]TradeUpdate = undefined;
+    var tape_count: usize = 0;
     var latest_status = std.mem.zeroes(StatusUpdate);
-    var candle_history: [2][512]CandleUpdate = undefined;
-    var candle_counts: [2]usize = .{ 0, 0 };
+    var candle_history: [NUM_INSTRUMENTS][512]CandleUpdate = undefined;
+    var candle_counts: [NUM_INSTRUMENTS]usize = .{0} ** NUM_INSTRUMENTS;
+    var footprint_history: [NUM_INSTRUMENTS][512]FootprintUpdate = undefined;
+    var footprint_counts: [NUM_INSTRUMENTS]usize = .{0} ** NUM_INSTRUMENTS;
     var engine_stopped = false;
     var ticks_since_event: u32 = 0;
     var show_positions_overlay: bool = false;
-    var bbo_history: [2][128]i64 = undefined;
-    var bbo_history_count: [2]usize = .{ 0, 0 };
+    var bbo_history: [NUM_INSTRUMENTS][128]i64 = undefined;
+    var bbo_history_count: [NUM_INSTRUMENTS]usize = .{0} ** NUM_INSTRUMENTS;
     var frame_count: u64 = 0;
     var order_arrival_frame: [MAX_ORDERS]u64 = std.mem.zeroes([MAX_ORDERS]u64);
-    var viewport_offset: [2]usize = .{ 0, 0 }; // per-instrument scroll offset
+    var viewport_offset: [NUM_INSTRUMENTS]usize = .{0} ** NUM_INSTRUMENTS; // per-instrument scroll offset
     var candle_width: u8 = 3; // shared zoom level
     var crosshair_active: bool = false;
-    var crosshair_idx: [2]usize = .{ 0, 0 }; // per-instrument cursor position
+    var crosshair_idx: [NUM_INSTRUMENTS]usize = .{0} ** NUM_INSTRUMENTS; // per-instrument cursor position
 
     // Input and focus state
     var input_handler = InputHandler.init();
@@ -119,7 +128,7 @@ pub fn main() !void {
             switch (event) {
                 .tick => {},
                 .orderbook_snapshot => |snap| {
-                    for (0..2) |i| {
+                    for (0..NUM_INSTRUMENTS) |i| {
                         if (std.mem.eql(u8, snap.instrument.slice(), orderbook_snap[i].instrument.slice()) or
                             orderbook_snap[i].bid_count == 0)
                         {
@@ -174,22 +183,57 @@ pub fn main() !void {
                         }
                     }
                 },
+                .trade_update => |tu| {
+                    if (tape_count < MAX_TAPE) {
+                        tape_buf[tape_count] = tu;
+                        tape_count += 1;
+                    } else {
+                        // Ring buffer: shift left and append
+                        for (0..MAX_TAPE - 1) |ti| {
+                            tape_buf[ti] = tape_buf[ti + 1];
+                        }
+                        tape_buf[MAX_TAPE - 1] = tu;
+                    }
+                },
                 .status => |s| {
                     latest_status = s;
                 },
                 .candle_update => |cu| {
                     // Determine instrument index by matching instrument name
                     var idx: usize = 0;
-                    for (0..2) |i| {
+                    for (0..NUM_INSTRUMENTS) |i| {
                         if (std.mem.eql(u8, orderbook_snap[i].instrument.slice(), cu.instrument.slice())) {
                             idx = i;
                             break;
                         }
                     }
-                    // Append to ring buffer (overwrite oldest if at 512)
-                    const slot = candle_counts[idx] % 512;
-                    candle_history[idx][slot] = cu;
-                    candle_counts[idx] += 1;
+                    // Update in-place if timestamp matches current bar, else append
+                    const count = candle_counts[idx];
+                    if (count > 0) {
+                        const last_slot = (count - 1) % 512;
+                        if (candle_history[idx][last_slot].timestamp == cu.timestamp) {
+                            candle_history[idx][last_slot] = cu;
+                        } else {
+                            const slot = count % 512;
+                            candle_history[idx][slot] = cu;
+                            candle_counts[idx] += 1;
+                        }
+                    } else {
+                        candle_history[idx][0] = cu;
+                        candle_counts[idx] = 1;
+                    }
+                },
+                .footprint_update => |fu| {
+                    var idx: usize = 0;
+                    for (0..NUM_INSTRUMENTS) |i| {
+                        if (std.mem.eql(u8, orderbook_snap[i].instrument.slice(), fu.instrument.slice())) {
+                            idx = i;
+                            break;
+                        }
+                    }
+                    const slot = footprint_counts[idx] % 512;
+                    footprint_history[idx][slot] = fu;
+                    footprint_counts[idx] += 1;
                 },
                 .shutdown_ack => {
                     engine_stopped = true;
@@ -224,8 +268,33 @@ pub fn main() !void {
         }
 
         // Chart panel (top-right, replaces positions panel in tab cycle)
-        const candle_len = @min(candle_counts[active_instrument], 512);
-        chart_panel.draw(&renderer, panels.chart, candle_history[active_instrument][0..candle_len], theme, viewport_offset[active_instrument], candle_width, crosshair_active, crosshair_idx[active_instrument]);
+        // Linearize candle ring buffer into chronological order for rendering.
+        const candle_total = candle_counts[active_instrument];
+        const candle_len = @min(candle_total, 512);
+        var candle_linear: [512]CandleUpdate = undefined;
+        if (candle_total > 512) {
+            // Ring has wrapped: head is at (candle_total % 512), which is the oldest entry.
+            const head = candle_total % 512;
+            const tail_len = 512 - head;
+            @memcpy(candle_linear[0..tail_len], candle_history[active_instrument][head..512]);
+            @memcpy(candle_linear[tail_len..512], candle_history[active_instrument][0..head]);
+        } else {
+            @memcpy(candle_linear[0..candle_len], candle_history[active_instrument][0..candle_len]);
+        }
+        // Linearize footprint ring buffer similarly.
+        const fp_total = footprint_counts[active_instrument];
+        const fp_len = @min(fp_total, 512);
+        var fp_linear: [512]FootprintUpdate = undefined;
+        if (fp_total > 512) {
+            const fp_head = fp_total % 512;
+            const fp_tail_len = 512 - fp_head;
+            @memcpy(fp_linear[0..fp_tail_len], footprint_history[active_instrument][fp_head..512]);
+            @memcpy(fp_linear[fp_tail_len..512], footprint_history[active_instrument][0..fp_head]);
+        } else {
+            @memcpy(fp_linear[0..fp_len], footprint_history[active_instrument][0..fp_len]);
+        }
+        const inst_name = orderbook_snap[active_instrument].instrument.slice();
+        chart_panel.draw(&renderer, panels.chart, candle_linear[0..candle_len], fp_linear[0..fp_len], theme, viewport_offset[active_instrument], candle_width, crosshair_active, crosshair_idx[active_instrument], inst_name);
 
         // Order entry panel
         order_entry.draw(&renderer, panels.order_entry, active_panel == PANEL_ORDER_ENTRY, theme);
@@ -234,6 +303,9 @@ pub fn main() !void {
         if (active_panel == PANEL_RECENT_ORDERS) renderer.writeRawPub("\x1b[1m");
         orders_panel.draw(&renderer, panels.recent_orders, orders_buf[0..orders_count], frame_count, theme);
         if (active_panel == PANEL_RECENT_ORDERS) renderer.writeRawPub("\x1b[0m");
+
+        // Trade tape panel (time & sales from fake traders)
+        trade_tape_panel.draw(&renderer, panels.trade_tape, &tape_buf, tape_count, theme);
 
         // Status bar
         if (status_msg_frames > 0) {
@@ -245,7 +317,7 @@ pub fn main() !void {
             renderer.drawText(panels.status_bar.x, panels.status_bar.y, "Engine stopped | q=quit | Tab=switch panel");
         } else {
             const status_age: u32 = if (status_msg_frames < 45) 45 - status_msg_frames else 0;
-            status_panel.draw(&renderer, panels.status_bar, &latest_status, status_age, theme);
+            status_panel.draw(&renderer, panels.status_bar, &latest_status, status_age, theme, inst_name);
         }
 
         // Positions overlay (drawn on top of all panels when toggled with 'p')
@@ -279,8 +351,17 @@ pub fn main() !void {
 
         if (goto_done) break;
 
+        // Keep order entry instrument in sync with active instrument
+        const active_sym = orderbook_snap[active_instrument].instrument.slice();
+        if (active_sym.len > 0 and !std.mem.eql(u8, order_entry.fields[0].slice(), active_sym)) {
+            order_entry.fields[0] = order_entry_panel_mod.TextField.init(active_sym);
+        }
+
         frame_count += 1;
-        std.Thread.sleep(66_000_000); // ~15 FPS
+        {
+            const req = std.os.linux.timespec{ .sec = 0, .nsec = 66_000_000 };
+            _ = std.os.linux.nanosleep(&req, null); // ~15 FPS
+        }
     }
 
     // Wait for engine thread
@@ -301,11 +382,11 @@ fn processAction(
     status_msg_len: *usize,
     status_msg_frames: *u32,
     show_positions_overlay: *bool,
-    viewport_offset: *[2]usize,
+    viewport_offset: *[NUM_INSTRUMENTS]usize,
     candle_width: *u8,
-    candle_counts: *[2]usize,
+    candle_counts: *[NUM_INSTRUMENTS]usize,
     crosshair_active: *bool,
-    crosshair_idx: *[2]usize,
+    crosshair_idx: *[NUM_INSTRUMENTS]usize,
 ) bool {
     _ = _handler;
     switch (action) {
@@ -338,8 +419,8 @@ fn processAction(
             if (active_panel.* == PANEL_ORDER_ENTRY) {
                 _ = order_entry.handleAction(action);
             } else if (c == 'i') {
-                // Toggle instrument in orderbook panel
-                active_instrument.* = (active_instrument.* + 1) % 2;
+                // Cycle through all instruments
+                active_instrument.* = (active_instrument.* + 1) % NUM_INSTRUMENTS;
             }
         },
         .arrow_up, .arrow_down => {

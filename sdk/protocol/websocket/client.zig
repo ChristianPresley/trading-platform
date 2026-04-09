@@ -11,14 +11,14 @@ pub const Message = struct {
     payload: []const u8,
 };
 
-const WsUrl = struct {
+pub const WsUrl = struct {
     scheme: []const u8, // "ws" or "wss"
     host: []const u8,
     port: u16,
     path: []const u8,
 };
 
-fn parseWsUrl(url: []const u8) !WsUrl {
+pub fn parseWsUrl(url: []const u8) !WsUrl {
     var scheme: []const u8 = undefined;
     var rest: []const u8 = undefined;
     var default_port: u16 = undefined;

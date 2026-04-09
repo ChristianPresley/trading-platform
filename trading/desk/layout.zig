@@ -2,7 +2,7 @@
 // Divides terminal into five panels.
 
 const terminal_mod = @import("terminal.zig");
-const Size = terminal_mod.Size;
+pub const Size = terminal_mod.Size;
 
 pub const Rect = struct {
     x: u16,
@@ -16,6 +16,7 @@ pub const Panels = struct {
     chart: Rect,
     order_entry: Rect,
     recent_orders: Rect,
+    trade_tape: Rect,
     status_bar: Rect,
     positions_overlay: Rect,
 };
@@ -35,8 +36,11 @@ pub fn compute(size: Size) Panels {
     const left_w = cols / 2;
     const right_w = cols - left_w;
 
-    // Bottom half (minus status): order entry (left 50%) + recent orders (right 50%)
+    // Bottom half (minus status): order entry (left 50%) + recent orders / trade tape (right 50%)
     const bottom_h = content_h - top_h;
+    // Split bottom-right vertically: recent orders (top 40%) + trade tape (bottom 60%)
+    const orders_h = bottom_h * 2 / 5;
+    const tape_h = bottom_h - orders_h;
 
     // Positions overlay: centered, half the terminal width, most of the height
     const overlay_w = cols / 2;
@@ -48,7 +52,8 @@ pub fn compute(size: Size) Panels {
         .orderbook = Rect{ .x = 0, .y = 0, .w = left_w, .h = top_h },
         .chart = Rect{ .x = left_w, .y = 0, .w = right_w, .h = top_h },
         .order_entry = Rect{ .x = 0, .y = top_h, .w = left_w, .h = bottom_h },
-        .recent_orders = Rect{ .x = left_w, .y = top_h, .w = right_w, .h = bottom_h },
+        .recent_orders = Rect{ .x = left_w, .y = top_h, .w = right_w, .h = orders_h },
+        .trade_tape = Rect{ .x = left_w, .y = top_h + orders_h, .w = right_w, .h = tape_h },
         .status_bar = Rect{ .x = 0, .y = rows - status_h, .w = cols, .h = status_h },
         .positions_overlay = Rect{ .x = overlay_x, .y = overlay_y, .w = overlay_w, .h = overlay_h },
     };

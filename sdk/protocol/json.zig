@@ -107,7 +107,7 @@ const Tokenizer = struct {
 
     fn parseString(self: *Tokenizer, allocator: std.mem.Allocator) ParseError![]const u8 {
         try self.expect('"');
-        var result: std.ArrayList(u8) = .{};
+        var result: std.ArrayList(u8) = .empty;
         errdefer result.deinit(allocator);
 
         while (true) {
@@ -297,8 +297,8 @@ pub const JsonParser = struct {
         tok.skipWhitespace();
         try tok.expect('{');
 
-        var keys_list: std.ArrayList([]const u8) = .{};
-        var vals_list: std.ArrayList(Value) = .{};
+        var keys_list: std.ArrayList([]const u8) = .empty;
+        var vals_list: std.ArrayList(Value) = .empty;
         errdefer {
             for (keys_list.items) |k| self.allocator.free(k);
             for (vals_list.items) |v| deinitValue(v, self.allocator);
@@ -358,7 +358,7 @@ pub const JsonParser = struct {
         tok.skipWhitespace();
         try tok.expect('[');
 
-        var items: std.ArrayList(Value) = .{};
+        var items: std.ArrayList(Value) = .empty;
         errdefer {
             for (items.items) |item| deinitValue(item, self.allocator);
             items.deinit(self.allocator);
@@ -398,9 +398,9 @@ pub const JsonParser = struct {
     }
 };
 
-/// Internal stringify to ArrayList writer (avoids anytype recursion issue).
-fn stringifyToList(value: Value, list: *std.ArrayList(u8), allocator: std.mem.Allocator) std.mem.Allocator.Error!void {
-    const writer = list.writer(allocator);
+/// Internal stringify to allocating writer (avoids anytype recursion issue).
+fn stringifyToWriter(value: Value, aw: *std.Io.Writer.Allocating) (std.Io.Writer.Error || std.mem.Allocator.Error)!void {
+    const writer = &aw.writer;
     switch (value) {
         .null_value => try writer.writeAll("null"),
         .boolean => |b| try writer.writeAll(if (b) "true" else "false"),
@@ -435,7 +435,7 @@ fn stringifyToList(value: Value, list: *std.ArrayList(u8), allocator: std.mem.Al
             try writer.writeByte('[');
             for (arr, 0..) |item, i| {
                 if (i > 0) try writer.writeByte(',');
-                try stringifyToList(item, list, allocator);
+                try stringifyToWriter(item, aw);
             }
             try writer.writeByte(']');
         },
@@ -457,7 +457,7 @@ fn stringifyToList(value: Value, list: *std.ArrayList(u8), allocator: std.mem.Al
                 }
                 try writer.writeByte('"');
                 try writer.writeByte(':');
-                try stringifyToList(obj.values_[i], list, allocator);
+                try stringifyToWriter(obj.values_[i], aw);
             }
             try writer.writeByte('}');
         },
@@ -466,23 +466,26 @@ fn stringifyToList(value: Value, list: *std.ArrayList(u8), allocator: std.mem.Al
 
 /// Serialize a Value into a newly allocated string. Caller must free.
 pub fn stringifyAlloc(allocator: std.mem.Allocator, value: Value) ![]const u8 {
-    var list: std.ArrayList(u8) = .{};
-    errdefer list.deinit(allocator);
-    try stringifyToList(value, &list, allocator);
-    return list.toOwnedSlice(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    errdefer {
+        var list = aw.toArrayList();
+        list.deinit(allocator);
+    }
+    try stringifyToWriter(value, &aw);
+    return try aw.toOwnedSlice();
 }
 
 /// Serialize a Value into a fixed-size buffer. Returns the serialized slice.
 /// Uses the buffer directly as backing storage via a fixed-buffer stream.
 pub fn stringify(value: Value, buf: []u8) ![]const u8 {
-    // Use a FixedBufferAllocator backed by the output buffer to avoid any heap allocation.
-    // We need a temporary buffer for the ArrayList — use a stack buffer.
+    // Use a FixedBufferAllocator backed by a stack buffer to avoid any heap allocation.
     var stack_buf: [65536]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&stack_buf);
     const fba_alloc = fba.allocator();
-    var tmp: std.ArrayList(u8) = .{};
-    try stringifyToList(value, &tmp, fba_alloc);
-    if (tmp.items.len > buf.len) return error.NoSpaceLeft;
-    @memcpy(buf[0..tmp.items.len], tmp.items);
-    return buf[0..tmp.items.len];
+    var aw: std.Io.Writer.Allocating = .init(fba_alloc);
+    try stringifyToWriter(value, &aw);
+    const result = aw.written();
+    if (result.len > buf.len) return error.NoSpaceLeft;
+    @memcpy(buf[0..result.len], result);
+    return buf[0..result.len];
 }

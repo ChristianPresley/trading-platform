@@ -60,13 +60,15 @@ pub const PositionManager = struct {
     positions: std.StringHashMap(Position),
     /// Storage for formatted keys (to keep ownership)
     key_buf: std.ArrayList([]u8),
+    /// Cached values buffer for allPositions()
+    values_cache: [64]Position = undefined,
 
     pub fn init(allocator: std.mem.Allocator, config: PositionConfig) !PositionManager {
         return PositionManager{
             .allocator = allocator,
             .config = config,
             .positions = std.StringHashMap(Position).init(allocator),
-            .key_buf = .{},
+            .key_buf = .empty,
         };
     }
 
@@ -99,7 +101,7 @@ pub const PositionManager = struct {
                 .quantity = 0,
                 .avg_cost = 0,
                 .realized_pnl = 0,
-                .lots = .{},
+                .lots = .empty,
             };
         }
         const pos = gop.value_ptr;
@@ -135,10 +137,10 @@ pub const PositionManager = struct {
                 const close_qty = fill_qty; // assume we close at most |pos.quantity| from the open side
                 const actual_close = @min(close_qty, if (pos.quantity > 0) pos.quantity else -pos.quantity);
 
-                const pnl: i64 = if (!is_buy)
-                    (fill.price - avg) * actual_close
+                const pnl: i64 = @intCast(if (!is_buy)
+                    @as(i128, fill.price - avg) * @as(i128, actual_close)
                 else
-                    (avg - fill.price) * actual_close;
+                    @as(i128, avg - fill.price) * @as(i128, actual_close));
 
                 pos.realized_pnl += pnl;
 
@@ -190,10 +192,10 @@ pub const PositionManager = struct {
                     const lot = &pos.lots.items[lot_idx];
                     const close_qty = @min(remaining, lot.quantity);
 
-                    const pnl: i64 = if (!is_buy)
-                        (fill.price - lot.price) * close_qty
+                    const pnl: i64 = @intCast(if (!is_buy)
+                        @as(i128, fill.price - lot.price) * @as(i128, close_qty)
                     else
-                        (lot.price - fill.price) * close_qty;
+                        @as(i128, lot.price - fill.price) * @as(i128, close_qty));
 
                     pos.realized_pnl += pnl;
                     lot.quantity -= close_qty;
@@ -245,49 +247,40 @@ pub const PositionManager = struct {
         const pos = self.positions.getPtr(key_str) orelse return null;
         if (pos.quantity == 0) return 0;
         if (pos.quantity > 0) {
-            return (mark_price - pos.avg_cost) * pos.quantity;
+            return @intCast(@as(i128, mark_price - pos.avg_cost) * @as(i128, pos.quantity));
         } else {
             // Short position
             const abs_qty = -pos.quantity;
-            return (pos.avg_cost - mark_price) * abs_qty;
+            return @intCast(@as(i128, pos.avg_cost - mark_price) * @as(i128, abs_qty));
         }
     }
 
     /// Returns all positions as a slice (valid until next mutation).
     pub fn allPositions(self: *PositionManager) []const Position {
-        // Collect into an array via iterator — caller does NOT own this memory
-        // We return a slice of the internal values (single-threaded safe)
-        // Note: StringHashMap does not guarantee order, but the slice is valid.
-        // We use a simple approach: collect value pointers.
-        // Since we cannot return a stable slice from the hash map internals,
-        // we use a cached approach: the caller must not mutate during iteration.
-        return self.positions.values();
+        var it = self.positions.valueIterator();
+        var i: usize = 0;
+        while (it.next()) |v| {
+            if (i >= 64) break;
+            self.values_cache[i] = v.*;
+            i += 1;
+        }
+        return self.values_cache[0..i];
     }
 
     // --- Private helpers ---
 
     /// Compute average cost from open lots (weighted average).
     fn computeAvgCost(self: *PositionManager, pos: *Position) i64 {
-        if (self.config.cost_basis_method == .average_cost) {
-            // Recompute weighted average from all lots
-            var total_qty: i64 = 0;
-            var total_cost: i64 = 0;
-            for (pos.lots.items) |lot| {
-                total_qty += lot.quantity;
-                total_cost += lot.price * lot.quantity;
-            }
-            if (total_qty == 0) return 0;
-            return @divTrunc(total_cost, total_qty);
-        }
-        // For FIFO/LIFO: compute weighted average of remaining lots
-        var total_qty: i64 = 0;
-        var total_cost: i64 = 0;
+        _ = self;
+        // Use i128 intermediates to avoid overflow on large prices (e.g. BTC)
+        var total_qty: i128 = 0;
+        var total_cost: i128 = 0;
         for (pos.lots.items) |lot| {
             total_qty += lot.quantity;
-            total_cost += lot.price * lot.quantity;
+            total_cost += @as(i128, lot.price) * @as(i128, lot.quantity);
         }
         if (total_qty == 0) return 0;
-        return @divTrunc(total_cost, total_qty);
+        return @intCast(@divTrunc(total_cost, total_qty));
     }
 
     /// Format position key as a string for use as hash map key (allocated, owned by key_buf).

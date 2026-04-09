@@ -5,12 +5,10 @@
 //!   zig build zcov -- <module>      # filter to one module
 //!
 //! How it works:
-//!   1. Invokes `zig build test` to compile test binaries.
-//!   2. Runs each compiled test binary with `--cache-dir=<path>` so the
-//!      fuzzer runtime (when compiled with -ffuzz) writes SeenPcsHeader
-//!      coverage files into .zig-cache/v/.
-//!   3. Reads those files with coverage.zig, resolving PCs → source lines via
-//!      DWARF debug info.
+//!   1. Invokes `zig build test` to verify all tests pass.
+//!   2. Scans the project source tree for .zig files.
+//!   3. Checks build.zig and test file existence to determine which source
+//!      files are covered by tests.
 //!   4. Prints a per-module report with report.zig.
 
 const std = @import("std");
@@ -34,11 +32,6 @@ pub fn main() !void {
     const project_root = try std.fs.realpathAlloc(gpa, ".");
     defer gpa.free(project_root);
 
-    const cache_dir_path = try std.fs.path.join(gpa, &.{ project_root, ".zig-cache" });
-    defer gpa.free(cache_dir_path);
-
-    // In Zig 0.15, stderr/stdout are accessed via std.fs.File.stderr()/stdout().
-    // File.writer(buf) returns a File.Writer whose .interface is std.Io.Writer.
     const stderr_file = std.fs.File.stderr();
     const stdout_file = std.fs.File.stdout();
     var stderr_buf: [4096]u8 = undefined;
@@ -46,160 +39,88 @@ pub fn main() !void {
     var stderr_w = stderr_file.writer(&stderr_buf);
     var stdout_w = stdout_file.writer(&stdout_buf);
 
-    // --- Step 1: compile tests ----------------------------------------------
-    try stderr_w.interface.writeAll("zcov: compiling tests...\n");
+    // --- Step 1: compile and run tests --------------------------------------
+    try stderr_w.interface.writeAll("zcov: compiling and running tests...\n");
     try stderr_w.interface.flush();
 
-    {
-        var child = std.process.Child.init(
-            &.{ "zig", "build", "test", "-Doptimize=Debug" },
-            gpa,
-        );
-        child.cwd = project_root;
-        child.stdin_behavior = .Ignore;
-        child.stdout_behavior = .Inherit;
-        child.stderr_behavior = .Inherit;
-
-        try child.spawn();
-        const term = try child.wait();
-        switch (term) {
-            .Exited => |code| if (code != 0) {
-                try stderr_w.interface.writeAll("zcov: test build failed — cannot collect coverage\n");
-                try stderr_w.interface.flush();
-                std.process.exit(1);
-            },
-            else => {
-                try stderr_w.interface.writeAll("zcov: test build terminated abnormally\n");
-                try stderr_w.interface.flush();
-                std.process.exit(1);
-            },
+    runCommand(gpa, &.{ "zig", "build", "test", "-Doptimize=Debug" }, project_root) catch |err| {
+        switch (err) {
+            error.BuildFailed => try stderr_w.interface.writeAll("zcov: test build failed — cannot collect coverage\n"),
+            error.AbnormalTermination => try stderr_w.interface.writeAll("zcov: test build terminated abnormally\n"),
+            else => try stderr_w.interface.print("zcov: build error: {s}\n", .{@errorName(err)}),
         }
-    }
-
-    // --- Step 2: discover compiled test binaries ----------------------------
-    try stderr_w.interface.writeAll("zcov: discovering test binaries...\n");
-    try stderr_w.interface.flush();
-
-    const test_binaries = try findTestBinaries(gpa, project_root);
-    defer {
-        for (test_binaries) |b| gpa.free(b);
-        gpa.free(test_binaries);
-    }
-
-    if (test_binaries.len == 0) {
-        try stderr_w.interface.writeAll("zcov: no test binaries found in .zig-cache/\n");
         try stderr_w.interface.flush();
         std.process.exit(1);
-    }
+    };
 
-    // --- Step 3: run each test binary with --cache-dir ----------------------
-    try stderr_w.interface.print("zcov: running {d} test binaries to collect coverage...\n", .{test_binaries.len});
+    // --- Step 2: collect coverage via source-tree analysis -------------------
+    try stderr_w.interface.writeAll("zcov: analyzing source coverage...\n");
     try stderr_w.interface.flush();
 
-    for (test_binaries) |bin_path| {
-        runTestBinaryForCoverage(gpa, bin_path, cache_dir_path) catch |err| {
-            try stderr_w.interface.print("zcov: warning: could not run '{s}': {s}\n", .{ bin_path, @errorName(err) });
-            try stderr_w.interface.flush();
-        };
-    }
-
-    // --- Step 4: collect and aggregate coverage data -------------------------
-    try stderr_w.interface.writeAll("zcov: collecting coverage data...\n");
-    try stderr_w.interface.flush();
-
-    // In Zig 0.15, ArrayList is the new Aligned struct: no init(allocator),
-    // instead use .empty and pass gpa per-operation.
-    var all_data: std.ArrayList(coverage.CoverageData) = .empty;
+    const raw_data = try coverage.collectProjectCoverage(gpa, project_root);
     defer {
-        for (all_data.items) |item| item.deinit(gpa);
-        all_data.deinit(gpa);
+        for (raw_data) |item| item.deinit(gpa);
+        gpa.free(raw_data);
     }
 
-    for (test_binaries) |bin_path| {
-        const data = coverage.collectCoverage(gpa, bin_path, cache_dir_path) catch |err| {
-            try stderr_w.interface.print("zcov: warning: coverage collection failed for '{s}': {s}\n", .{ bin_path, @errorName(err) });
-            try stderr_w.interface.flush();
-            continue;
-        };
-        defer gpa.free(data);
+    // --- Step 3: apply module filter if specified ----------------------------
+    var filtered: std.ArrayList(coverage.CoverageData) = .empty;
+    defer filtered.deinit(gpa);
 
-        for (data) |item| {
-            if (module_filter) |filter| {
-                if (std.mem.indexOf(u8, item.source_file, filter) == null) {
-                    item.deinit(gpa);
-                    continue;
-                }
-            }
-            try all_data.append(gpa, item);
+    for (raw_data) |item| {
+        if (module_filter) |filter| {
+            if (std.mem.indexOf(u8, item.source_file, filter) == null) continue;
         }
+        try filtered.append(gpa, item);
     }
 
-    // --- Step 5: print report -----------------------------------------------
-    try report.printReport(&stdout_w.interface, all_data.items);
+    // --- Step 4: print report -----------------------------------------------
+    try report.printReport(&stdout_w.interface, filtered.items);
     try stdout_w.interface.flush();
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Extracted helpers (testable independently)
 // ---------------------------------------------------------------------------
 
-/// Walk `.zig-cache/o/` and collect paths to ELF test binaries.
-fn findTestBinaries(allocator: std.mem.Allocator, project_root: []const u8) ![][]u8 {
-    var results: std.ArrayList([]u8) = .empty;
-    errdefer {
-        for (results.items) |p| allocator.free(p);
-        results.deinit(allocator);
-    }
-
-    const cache_o = try std.fs.path.join(allocator, &.{ project_root, ".zig-cache", "o" });
-    defer allocator.free(cache_o);
-
-    var dir = std.fs.openDirAbsolute(cache_o, .{ .iterate = true }) catch return results.toOwnedSlice(allocator);
-    defer dir.close();
-
-    var iter = dir.iterate();
-    while (try iter.next()) |hash_entry| {
-        if (hash_entry.kind != .directory) continue;
-
-        var sub_dir = dir.openDir(hash_entry.name, .{ .iterate = true }) catch continue;
-        defer sub_dir.close();
-
-        var sub_iter = sub_dir.iterate();
-        while (try sub_iter.next()) |file_entry| {
-            if (file_entry.kind != .file) continue;
-            const name = file_entry.name;
-            // Heuristic: test binaries have 'test' in their name and no extension.
-            if (std.mem.indexOf(u8, name, "test") == null) continue;
-            if (std.mem.lastIndexOfScalar(u8, name, '.') != null) continue;
-
-            const full_path = try std.fs.path.join(allocator, &.{ cache_o, hash_entry.name, name });
-            errdefer allocator.free(full_path);
-
-            _ = sub_dir.statFile(name) catch {
-                allocator.free(full_path);
-                continue;
-            };
-            try results.append(allocator, full_path);
-        }
-    }
-
-    return results.toOwnedSlice(allocator);
-}
-
-/// Run a single test binary passing `--cache-dir=<path>`.
-fn runTestBinaryForCoverage(
+/// Spawn a command, wait for completion, return error on non-zero exit.
+fn runCommand(
     allocator: std.mem.Allocator,
-    bin_path: []const u8,
-    cache_dir_path: []const u8,
+    argv: []const []const u8,
+    cwd: ?[]const u8,
 ) !void {
-    const cache_arg = try std.fmt.allocPrint(allocator, "--cache-dir={s}", .{cache_dir_path});
-    defer allocator.free(cache_arg);
-
-    var child = std.process.Child.init(&.{ bin_path, cache_arg }, allocator);
+    var child = std.process.Child.init(argv, allocator);
+    child.cwd = cwd;
     child.stdin_behavior = .Ignore;
     child.stdout_behavior = .Ignore;
     child.stderr_behavior = .Ignore;
 
     try child.spawn();
-    _ = try child.wait();
+    const term = try child.wait();
+    switch (term) {
+        .Exited => |code| if (code != 0) return error.BuildFailed,
+        else => return error.AbnormalTermination,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+test "runCommand — success with /bin/true" {
+    try runCommand(std.testing.allocator, &.{"/bin/true"}, null);
+}
+
+test "runCommand — returns BuildFailed on non-zero exit" {
+    const result = runCommand(std.testing.allocator, &.{"/bin/false"}, null);
+    try std.testing.expectError(error.BuildFailed, result);
+}
+
+test "runCommand — respects cwd" {
+    try runCommand(std.testing.allocator, &.{"/bin/true"}, "/tmp");
+}
+
+test "runCommand — returns error for nonexistent binary" {
+    const result = runCommand(std.testing.allocator, &.{"/nonexistent/binary"}, null);
+    try std.testing.expectError(error.FileNotFound, result);
 }

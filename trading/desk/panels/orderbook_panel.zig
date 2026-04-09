@@ -4,23 +4,24 @@ const std = @import("std");
 const Renderer = @import("../renderer.zig").Renderer;
 const layout = @import("../layout.zig");
 const Rect = layout.Rect;
-const msg = @import("../messages.zig");
+pub const msg = @import("../messages.zig");
 const OrderbookSnapshot = msg.OrderbookSnapshot;
 const Theme = @import("../theme.zig").Theme;
 
 /// Format a fixed-point i64 price (8 decimal places) as decimal with 2 decimal places.
 /// e.g., 5_000_000_000_000 -> "50000.00"
-fn fmtPrice(buf: *[32]u8, price: i64) []const u8 {
+pub fn fmtPrice(buf: *[32]u8, price: i64) []const u8 {
     const whole = @divTrunc(price, 100_000_000);
     const frac = @abs(@rem(price, 100_000_000));
     const frac2 = frac / 1_000_000; // 2 decimal places
     return std.fmt.bufPrint(buf, "{d}.{d:02}", .{ whole, frac2 }) catch "?";
 }
 
-/// Format a quantity (also stored with 8 decimal places) in simplified form.
-fn fmtQty(buf: *[24]u8, qty: i64) []const u8 {
+/// Format a quantity (stored with 8 decimal places) as decimal with 2 fractional digits.
+pub fn fmtQty(buf: *[24]u8, qty: i64) []const u8 {
     const whole = @divTrunc(qty, 100_000_000);
-    return std.fmt.bufPrint(buf, "{d}", .{whole}) catch "?";
+    const frac = @abs(@rem(qty, 100_000_000)) / 1_000_000;
+    return std.fmt.bufPrint(buf, "{d}.{d:02}", .{ whole, frac }) catch "?";
 }
 
 /// Sparkline block characters: ▁▂▃▄▅▆▇█ (each 3 bytes UTF-8)
@@ -46,7 +47,7 @@ const DEPTH_CHARS = [4][3]u8{
 /// Build a sparkline into buf from the provided values.
 /// Returns a slice of buf containing the UTF-8 characters.
 /// Each character is 3 bytes (Unicode block chars).
-fn sparkline(values: []const i64, width: u16, buf: []u8) []const u8 {
+pub fn sparkline(values: []const i64, width: u16, buf: []u8) []const u8 {
     if (values.len == 0 or width == 0) return buf[0..0];
 
     // Find min/max
@@ -81,7 +82,7 @@ fn sparkline(values: []const i64, width: u16, buf: []u8) []const u8 {
 
 /// Build a depth bar into buf.
 /// Returns a slice of buf.
-fn depthBar(quantity: i64, max_quantity: i64, width: u16, buf: []u8) []const u8 {
+pub fn depthBar(quantity: i64, max_quantity: i64, width: u16, buf: []u8) []const u8 {
     if (max_quantity <= 0 or width == 0) return buf[0..0];
 
     const ratio = @as(u64, @intCast(@max(0, quantity))) * @as(u64, width) / @as(u64, @intCast(@max(1, max_quantity)));

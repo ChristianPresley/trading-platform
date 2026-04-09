@@ -141,7 +141,7 @@ fn makeMinimalCertDer(allocator: std.mem.Allocator) ![]u8 {
     //
     // We build a very minimal one for structural testing.
 
-    var cert: std.ArrayList(u8) = .{};
+    var cert: std.ArrayList(u8) = .empty;
     errdefer cert.deinit(allocator);
 
     // Helper to write TLV
@@ -163,7 +163,7 @@ fn makeMinimalCertDer(allocator: std.mem.Allocator) ![]u8 {
     const cn_oid = [_]u8{ 0x06, 0x03, 0x55, 0x04, 0x03 };
     // commonName value as PrintableString
     const cn_value_bytes = "test.example.com";
-    var cn_attr_content: std.ArrayList(u8) = .{};
+    var cn_attr_content: std.ArrayList(u8) = .empty;
     defer cn_attr_content.deinit(allocator);
     try cn_attr_content.appendSlice(allocator, &cn_oid);
     // PrintableString tag = 0x13
@@ -172,15 +172,15 @@ fn makeMinimalCertDer(allocator: std.mem.Allocator) ![]u8 {
     try cn_attr_content.appendSlice(allocator, cn_value_bytes);
 
     // Build RDN: SET { SEQUENCE { OID, value } }
-    var rdn_seq: std.ArrayList(u8) = .{};
+    var rdn_seq: std.ArrayList(u8) = .empty;
     defer rdn_seq.deinit(allocator);
     try append_tlv(&rdn_seq, allocator, 0x30, cn_attr_content.items); // SEQUENCE
-    var rdn_set: std.ArrayList(u8) = .{};
+    var rdn_set: std.ArrayList(u8) = .empty;
     defer rdn_set.deinit(allocator);
     try append_tlv(&rdn_set, allocator, 0x31, rdn_seq.items); // SET
 
     // Build tbsCertificate
-    var tbs: std.ArrayList(u8) = .{};
+    var tbs: std.ArrayList(u8) = .empty;
     defer tbs.deinit(allocator);
 
     // serialNumber INTEGER = 1
@@ -196,7 +196,7 @@ fn makeMinimalCertDer(allocator: std.mem.Allocator) ![]u8 {
     try tbs.appendSlice(allocator, rdn_set.items);
 
     // validity: UTCTime not-before=700101000000Z not-after=491231235959Z
-    var validity: std.ArrayList(u8) = .{};
+    var validity: std.ArrayList(u8) = .empty;
     defer validity.deinit(allocator);
     const not_before = "700101000000Z";
     const not_after = "491231235959Z";
@@ -215,23 +215,23 @@ fn makeMinimalCertDer(allocator: std.mem.Allocator) ![]u8 {
     const rsa_oid = [_]u8{ 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00 };
     // BIT STRING with a single 0x00 (unused bits) + minimal modulus/exponent
     const fake_key = [_]u8{ 0x00, 0x30, 0x0d, 0x02, 0x01, 0x01, 0x02, 0x03, 0x01, 0x00, 0x01 };
-    var spki: std.ArrayList(u8) = .{};
+    var spki: std.ArrayList(u8) = .empty;
     defer spki.deinit(allocator);
     try append_tlv(&spki, allocator, 0x30, &rsa_oid);
     try append_tlv(&spki, allocator, 0x03, &fake_key);
     try append_tlv(&tbs, allocator, 0x30, spki.items);
 
     // Wrap tbs in SEQUENCE
-    var tbs_seq: std.ArrayList(u8) = .{};
+    var tbs_seq: std.ArrayList(u8) = .empty;
     defer tbs_seq.deinit(allocator);
     try append_tlv(&tbs_seq, allocator, 0x30, tbs.items);
 
     // signatureAlgorithm (same as above)
-    var sig_algo_wrapper: std.ArrayList(u8) = .{};
+    var sig_algo_wrapper: std.ArrayList(u8) = .empty;
     defer sig_algo_wrapper.deinit(allocator);
     try sig_algo_wrapper.appendSlice(allocator, &sig_algo_oid);
     // Already a SEQUENCE, just copy it
-    var full_sig_algo: std.ArrayList(u8) = .{};
+    var full_sig_algo: std.ArrayList(u8) = .empty;
     defer full_sig_algo.deinit(allocator);
     try append_tlv(&full_sig_algo, allocator, 0x30, &sig_algo_oid);
 
@@ -239,7 +239,7 @@ fn makeMinimalCertDer(allocator: std.mem.Allocator) ![]u8 {
     const fake_sig = [_]u8{ 0x00, 0xDE, 0xAD, 0xBE, 0xEF };
 
     // Assemble full certificate
-    var cert_inner: std.ArrayList(u8) = .{};
+    var cert_inner: std.ArrayList(u8) = .empty;
     defer cert_inner.deinit(allocator);
     try cert_inner.appendSlice(allocator, tbs_seq.items);
     try cert_inner.appendSlice(allocator, full_sig_algo.items);

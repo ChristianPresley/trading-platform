@@ -4,11 +4,12 @@ const std = @import("std");
 const Renderer = @import("../renderer.zig").Renderer;
 const layout = @import("../layout.zig");
 const Rect = layout.Rect;
-const msg = @import("../messages.zig");
+pub const msg = @import("../messages.zig");
 const UserCommand = msg.UserCommand;
 const OrderRequest = msg.OrderRequest;
 const InstrumentId = msg.InstrumentId;
-const Action = @import("../input.zig").Action;
+pub const input_mod = @import("../input.zig");
+const Action = input_mod.Action;
 const Theme = @import("../theme.zig").Theme;
 
 pub const TextField = struct {

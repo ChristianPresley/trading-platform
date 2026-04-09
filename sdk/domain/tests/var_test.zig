@@ -44,7 +44,7 @@ test "expected shortfall > VaR" {
 }
 
 test "Monte Carlo VaR is positive and plausible for 1-asset normal" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

@@ -32,7 +32,11 @@ pub const SpotAuth = struct {
 
     /// Returns a monotonically increasing nonce based on microsecond timestamp.
     pub fn nextNonce(self: *SpotAuth) u64 {
-        const ts = std.time.microTimestamp();
+        const ts = blk: {
+            var ts_: std.os.linux.timespec = undefined;
+            _ = std.os.linux.clock_gettime(.REALTIME, &ts_);
+            break :blk @as(i64, ts_.sec) * 1_000_000 + @divTrunc(@as(i64, ts_.nsec), 1_000);
+        };
         const ts_u: u64 = @intCast(@max(0, ts));
         // Ensure monotonicity
         if (ts_u > self.nonce_counter) {
@@ -105,6 +109,10 @@ pub const SpotAuth = struct {
 
 /// Standalone nonce function for use without an auth instance.
 pub fn nextNonce() u64 {
-    const ts = std.time.microTimestamp();
+    const ts = blk: {
+        var ts_: std.os.linux.timespec = undefined;
+        _ = std.os.linux.clock_gettime(.REALTIME, &ts_);
+        break :blk @as(i64, ts_.sec) * 1_000_000 + @divTrunc(@as(i64, ts_.nsec), 1_000);
+    };
     return @intCast(@max(0, ts));
 }

@@ -3,7 +3,8 @@
 
 const std = @import("std");
 const SpscRingBuffer = @import("ring_buffer").SpscRingBuffer;
-const msg = @import("messages.zig");
+pub const messages = @import("messages.zig");
+const msg = messages;
 const EngineEvent = msg.EngineEvent;
 const UserCommand = msg.UserCommand;
 const OrderbookSnapshot = msg.OrderbookSnapshot;
@@ -12,7 +13,9 @@ const InstrumentId = msg.InstrumentId;
 const CandleUpdate = msg.CandleUpdate;
 
 const SyntheticFeed = @import("synthetic.zig").SyntheticFeed;
-const L2Book = @import("orderbook").L2Book;
+const orderbook = @import("orderbook");
+const L2Book = orderbook.L2Book;
+const BookSide = orderbook.Side;
 const oms_mod = @import("oms");
 const OrderManager = oms_mod.OrderManager;
 const Order = oms_mod.Order;
@@ -20,6 +23,8 @@ const ExecType = oms_mod.ExecType;
 const FillInfo = oms_mod.FillInfo;
 const bar_agg = @import("bar_aggregator");
 const BarAggregator = bar_agg.BarAggregator;
+const FootprintAggregator = bar_agg.FootprintAggregator;
+const FootprintUpdate = msg.FootprintUpdate;
 
 const pre_trade_mod = @import("pre_trade");
 const PreTradeRisk = pre_trade_mod.PreTradeRisk;
@@ -32,6 +37,9 @@ const Fill = positions_mod.Fill;
 
 const matching_mod = @import("matching_engine.zig");
 const MatchingEngine = matching_mod.MatchingEngine;
+
+const fake_traders_mod = @import("fake_traders.zig");
+const FakeTraderPool = fake_traders_mod.FakeTraderPool;
 
 const basis_mod = @import("basis");
 const BasisStrategy = basis_mod.BasisStrategy;
@@ -89,6 +97,12 @@ const INSTRUMENTS = [_][]const u8{
     "BTC-USD-20231229",
 };
 
+fn clampToI64(v: f64) i64 {
+    if (std.math.isNan(v) or std.math.isInf(v)) return 0;
+    const clamped = std.math.clamp(v, -9_000_000_000_000_000.0, 9_000_000_000_000_000.0);
+    return @intFromFloat(clamped);
+}
+
 /// Noop event store append function (no persistence needed in demo).
 fn storeAppendNoop(store: *anyopaque, data: []const u8) anyerror!u64 {
     _ = store;
@@ -120,10 +134,16 @@ pub const Engine = struct {
     // Candle aggregators (one per instrument)
     candle_aggs: [8]BarAggregator,
 
+    // Volume footprint aggregators (one per instrument)
+    footprint_aggs: [8]FootprintAggregator,
+
     // Real risk, matching, and position management
     risk: *PreTradeRisk,
     pos_manager: PositionManager,
     matching: MatchingEngine,
+
+    // Fake traders (demo market participants)
+    fake_traders: FakeTraderPool,
 
     // Strategy and algo automation
     basis_strategy: BasisStrategy,
@@ -146,7 +166,10 @@ pub const Engine = struct {
         to_tui: *SpscRingBuffer(EngineEvent),
         from_tui: *SpscRingBuffer(UserCommand),
     ) !Engine {
-        const now_seed: u64 = @intCast(std.time.milliTimestamp());
+        // Use CLOCK_REALTIME for seed (milliTimestamp removed in 0.16)
+        var ts: std.os.linux.timespec = undefined;
+        _ = std.os.linux.clock_gettime(.REALTIME, &ts);
+        const now_seed: u64 = @intCast(@as(i64, ts.sec) *% 1000 + @divTrunc(@as(i64, ts.nsec), 1_000_000));
         var feed = try SyntheticFeed.init(allocator, now_seed);
         errdefer feed.deinit();
 
@@ -232,9 +255,20 @@ pub const Engine = struct {
                 BarAggregator.init(60_000_000_000),
                 BarAggregator.init(60_000_000_000),
             },
+            .footprint_aggs = .{
+                FootprintAggregator.init(60_000_000_000, 100_000), // 1-min bars, tick_size=100_000
+                FootprintAggregator.init(60_000_000_000, 100_000),
+                FootprintAggregator.init(60_000_000_000, 100_000),
+                FootprintAggregator.init(60_000_000_000, 100_000),
+                FootprintAggregator.init(60_000_000_000, 100_000),
+                FootprintAggregator.init(60_000_000_000, 100_000),
+                FootprintAggregator.init(60_000_000_000, 100_000),
+                FootprintAggregator.init(60_000_000_000, 100_000),
+            },
             .risk = risk,
             .pos_manager = pos_manager,
             .matching = MatchingEngine.init(),
+            .fake_traders = FakeTraderPool.init(now_seed +% 0xDEAD_BEEF),
             .basis_strategy = basis_strategy,
             .funding_arb_strategy = funding_arb_strategy,
             .active_algos = std.mem.zeroes([16]ActiveAlgo),
@@ -297,6 +331,33 @@ pub const Engine = struct {
 
     /// Engine main loop. Runs in a separate thread.
     pub fn run(self: *Engine) void {
+        // Push initial orderbook snapshots before warmup so TUI has instrument
+        // names for routing candle/footprint events to the correct indices.
+        for (0..8) |i| {
+            const book = self.feed.getBook(i);
+            const snap = snapshotBook(book, INSTRUMENTS[i]);
+            _ = self.to_tui.push(EngineEvent{ .orderbook_snapshot = snap });
+        }
+
+        // Warmup: fast-forward synthetic feed to pre-seed candle history.
+        // 600 ticks = 1 candle (1-min bar at 100ms ticks). Generate ~30 candles.
+        const warmup_ticks: u64 = 30 * 600;
+        for (0..warmup_ticks) |_| {
+            self.tick += 1;
+            self.feed.tick();
+            const timestamp_ns: u64 = self.tick * 100_000_000;
+            // Run fake traders during warmup for realistic candle volume.
+            // push_events=false suppresses trade tape events; candle/footprint
+            // events are pushed unconditionally to pre-seed chart history.
+            self.runFakeTraders(timestamp_ns, false);
+        }
+        // Push updated orderbook snapshots after warmup with current book state
+        for (0..8) |i| {
+            const book = self.feed.getBook(i);
+            const snap = snapshotBook(book, INSTRUMENTS[i]);
+            _ = self.to_tui.push(EngineEvent{ .orderbook_snapshot = snap });
+        }
+
         while (self.running.load(.acquire)) {
             self.tick += 1;
 
@@ -327,12 +388,20 @@ pub const Engine = struct {
                 }) catch {};
             }
 
+            // Run fake traders — generate simulated market participant trades
+            self.runFakeTraders(timestamp_ns, true);
+
             // Update reference prices for risk checks
             for (0..8) |i| {
                 const book = self.feed.getBook(i);
                 if (book.midPrice()) |mid| {
                     self.risk.setReferencePrice(INSTRUMENTS[i], mid) catch {};
                 }
+            }
+
+            // Periodic OMS cleanup: purge terminal orders to prevent unbounded growth
+            if (self.tick % 100 == 0) {
+                self.oms.purgeTerminal();
             }
 
             // Run analytics and post-trade
@@ -342,27 +411,23 @@ pub const Engine = struct {
             self.runAlgos();
             self.runEod();
 
-            // Push orderbook snapshots and aggregate candles for each instrument
+            // Push orderbook snapshots and in-progress candles for each instrument
             for (0..8) |i| {
                 const book = self.feed.getBook(i);
                 const snap = snapshotBook(book, INSTRUMENTS[i]);
                 _ = self.to_tui.push(EngineEvent{ .orderbook_snapshot = snap });
 
-                // Compute BBO midpoint and feed to candle aggregator (skip if book is empty)
-                if (snap.bid_count > 0 and snap.ask_count > 0) {
-                    const midpoint = @divTrunc(snap.bids[0].price + snap.asks[0].price, 2);
-                    if (self.candle_aggs[i].onTrade(midpoint, 1, @as(u128, timestamp_ns))) |bar| {
-                        const cu = CandleUpdate{
-                            .instrument = snap.instrument,
-                            .open = bar.open,
-                            .high = bar.high,
-                            .low = bar.low,
-                            .close = bar.close,
-                            .volume = bar.volume,
-                            .timestamp = @truncate(bar.timestamp),
-                        };
-                        _ = self.to_tui.push(EngineEvent{ .candle_update = cu });
-                    }
+                // Push in-progress candle so chart updates in realtime
+                if (self.candle_aggs[i].peek()) |bar| {
+                    _ = self.to_tui.push(EngineEvent{ .candle_update = CandleUpdate{
+                        .instrument = InstrumentId.fromSlice(INSTRUMENTS[i]),
+                        .open = bar.open,
+                        .high = bar.high,
+                        .low = bar.low,
+                        .close = bar.close,
+                        .volume = bar.volume,
+                        .timestamp = @truncate(bar.timestamp),
+                    } });
                 }
             }
 
@@ -432,7 +497,81 @@ pub const Engine = struct {
                 }
             }
 
-            std.Thread.sleep(100_000_000); // 100ms per tick
+            {
+                const req = std.os.linux.timespec{ .sec = 0, .nsec = 100_000_000 };
+                _ = std.os.linux.nanosleep(&req, null); // 100ms per tick
+            }
+        }
+    }
+
+    fn runFakeTraders(self: *Engine, timestamp_ns: u64, push_events: bool) void {
+        const trades = self.fake_traders.onTick(self.tick, &self.feed.books);
+        for (0..trades.count) |i| {
+            const trade = &trades.trades[i];
+            // Apply trade volume to the book: consume liquidity at the trade price
+            const side: BookSide = if (trade.side == .buy) .ask else .bid;
+            self.feed.books[trade.instrument_idx].applyUpdate(
+                side,
+                trade.price,
+                0, // remove the level (simulates consumption)
+            );
+            // Feed trade into candle aggregator as volume
+            if (self.candle_aggs[trade.instrument_idx].onTrade(
+                trade.price,
+                trade.quantity,
+                @as(u128, timestamp_ns),
+            )) |bar| {
+                const cu = CandleUpdate{
+                    .instrument = InstrumentId.fromSlice(INSTRUMENTS[trade.instrument_idx]),
+                    .open = bar.open,
+                    .high = bar.high,
+                    .low = bar.low,
+                    .close = bar.close,
+                    .volume = bar.volume,
+                    .timestamp = @truncate(bar.timestamp),
+                };
+                _ = self.to_tui.push(EngineEvent{ .candle_update = cu });
+            }
+            // Feed trade into footprint aggregator with side info
+            const fp_side: u8 = if (trade.side == .buy) 0 else 1;
+            if (self.footprint_aggs[trade.instrument_idx].onTrade(
+                trade.price,
+                trade.quantity,
+                fp_side,
+                @as(u128, timestamp_ns),
+            )) |fp| {
+                var fu = FootprintUpdate{
+                    .instrument = InstrumentId.fromSlice(INSTRUMENTS[trade.instrument_idx]),
+                    .timestamp = @truncate(fp.timestamp),
+                    .levels = undefined,
+                    .level_count = fp.level_count,
+                    .delta = fp.delta,
+                    .total_volume = fp.total_volume,
+                    .tick_size = fp.tick_size,
+                };
+                for (0..fp.level_count) |li| {
+                    fu.levels[li] = msg.FootprintLevel{
+                        .price = fp.levels[li].price,
+                        .bid_volume = fp.levels[li].bid_volume,
+                        .ask_volume = fp.levels[li].ask_volume,
+                    };
+                }
+                _ = self.to_tui.push(EngineEvent{ .footprint_update = fu });
+            }
+            // Push trade to TUI for time & sales tape (skip during warmup)
+            if (push_events) {
+                var tu = msg.TradeUpdate{
+                    .instrument = InstrumentId.fromSlice(INSTRUMENTS[trade.instrument_idx]),
+                    .side = if (trade.side == .buy) @as(u8, 0) else @as(u8, 1),
+                    .quantity = trade.quantity,
+                    .price = trade.price,
+                    .tick = self.tick,
+                    .trader_tag = undefined,
+                    .trader_tag_len = trade.tag_len,
+                };
+                @memcpy(tu.trader_tag[0..trade.tag_len], trade.tag[0..trade.tag_len]);
+                _ = self.to_tui.push(EngineEvent{ .trade_update = tu });
+            }
         }
     }
 
@@ -465,9 +604,9 @@ pub const Engine = struct {
 
         const tca_event = msg.TcaReportEvent{
             .instrument = msg.InstrumentId.fromSlice(instrument_name),
-            .is_cost_bps = @intFromFloat(report.is_cost_bps * 100.0),
-            .fill_rate_pct = @intFromFloat(@min(report.fill_rate * 100.0, 100.0)),
-            .market_impact_bps = @intFromFloat(report.market_impact_bps * 100.0),
+            .is_cost_bps = clampToI64(report.is_cost_bps * 100.0),
+            .fill_rate_pct = @intCast(@as(u64, @intFromFloat(std.math.clamp(report.fill_rate * 100.0, 0.0, 100.0)))),
+            .market_impact_bps = clampToI64(report.market_impact_bps * 100.0),
         };
         _ = self.to_tui.push(EngineEvent{ .tca_report = tca_event });
         pending.active = false;

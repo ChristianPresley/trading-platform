@@ -1,6 +1,6 @@
 // Terminal management for Trading Desk TUI
 // Handles raw mode, alternate screen, size detection, non-blocking stdin.
-// Designed for Zig 0.15 on Linux.
+// Designed for Zig 0.16 on Linux.
 
 const std = @import("std");
 const posix = std.posix;
@@ -22,21 +22,16 @@ fn signalHandler(sig: i32) callconv(.c) void {
 pub const Terminal = struct {
     original_termios: posix.termios,
     stdin_fd: posix.fd_t,
-    stdout: std.fs.File,
+    stdout_fd: posix.fd_t,
     buf: [65536]u8,
     buf_pos: usize,
 
     pub fn init() !Terminal {
         const stdin_fd = posix.STDIN_FILENO;
-        const stdout_file = std.fs.File.stdout();
+        const stdout_fd = posix.STDOUT_FILENO;
 
-        // Save original termios
-        const original = try posix.tcgetattr(stdin_fd);
-
-        // Check if stdin is a terminal
-        if (!posix.isatty(stdin_fd)) {
-            return error.NotATerminal;
-        }
+        // Save original termios (fails with NotATerminal if stdin is not a tty)
+        const original = posix.tcgetattr(stdin_fd) catch return error.NotATerminal;
 
         // Set raw mode
         var raw = original;
@@ -55,7 +50,7 @@ pub const Terminal = struct {
         var term = Terminal{
             .original_termios = original,
             .stdin_fd = stdin_fd,
-            .stdout = stdout_file,
+            .stdout_fd = stdout_fd,
             .buf = undefined,
             .buf_pos = 0,
         };
@@ -118,6 +113,17 @@ pub const Terminal = struct {
         return byte[0];
     }
 
+    /// Write all bytes to stdout fd via raw syscall.
+    fn writeAll(self: *Terminal, data: []const u8) !void {
+        var written: usize = 0;
+        while (written < data.len) {
+            const rc = linux.write(self.stdout_fd, data[written..].ptr, data[written..].len);
+            const signed: isize = @bitCast(rc);
+            if (signed < 0) return error.WriteFailed;
+            written += @intCast(rc);
+        }
+    }
+
     /// Write raw bytes to the internal buffer.
     fn writeStr(self: *Terminal, data: []const u8) !void {
         if (self.buf_pos + data.len > self.buf.len) {
@@ -125,7 +131,7 @@ pub const Terminal = struct {
         }
         if (data.len > self.buf.len) {
             // Too large for buffer, write directly
-            _ = try self.stdout.write(data);
+            try self.writeAll(data);
             return;
         }
         @memcpy(self.buf[self.buf_pos .. self.buf_pos + data.len], data);
@@ -142,7 +148,7 @@ pub const Terminal = struct {
     /// Flush internal buffer to stdout.
     pub fn flushBuf(self: *Terminal) !void {
         if (self.buf_pos == 0) return;
-        _ = try self.stdout.write(self.buf[0..self.buf_pos]);
+        try self.writeAll(self.buf[0..self.buf_pos]);
         self.buf_pos = 0;
     }
 

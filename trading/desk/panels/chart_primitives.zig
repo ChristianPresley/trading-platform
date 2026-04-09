@@ -3,7 +3,8 @@
 
 const std = @import("std");
 const Rgb = @import("../theme.zig").Rgb;
-const CandleUpdate = @import("../messages.zig").CandleUpdate;
+pub const msg = @import("../messages.zig");
+const CandleUpdate = msg.CandleUpdate;
 
 /// The 8 lower-block Unicode characters ▁▂▃▄▅▆▇█ (U+2581..U+2588).
 /// Each is 3 bytes in UTF-8.
@@ -105,7 +106,6 @@ test "scaleYSub_zero_height" {
 }
 
 test "smaCompute_exact" {
-    const msg = @import("../messages.zig");
     // 5 candles with close prices: 10, 20, 30, 40, 50 (stored as fixed-point * 100_000_000)
     const scale: i64 = 100_000_000;
     var candles: [5]msg.CandleUpdate = undefined;
@@ -127,7 +127,6 @@ test "smaCompute_exact" {
 }
 
 test "smaCompute_insufficient" {
-    const msg = @import("../messages.zig");
     var candles: [3]msg.CandleUpdate = undefined;
     for (&candles) |*c| c.* = std.mem.zeroes(msg.CandleUpdate);
 

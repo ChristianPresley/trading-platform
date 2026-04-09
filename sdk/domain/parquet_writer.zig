@@ -47,14 +47,14 @@ pub const ParquetWriter = struct {
         errdefer file.close();
 
         // Write PAR1 magic header
-        _ = try file.write(MAGIC);
+        try file.writeAll(MAGIC);
 
         return ParquetWriter{
             .allocator = allocator,
             .file = file,
             .schema = schema,
             .total_rows = 0,
-            .row_group_meta = .{},
+            .row_group_meta = .empty,
         };
     }
 
@@ -72,8 +72,8 @@ pub const ParquetWriter = struct {
             const num_values: u32 = @as(u32, @intCast(col.data.len / columnWidth(col.def.type)));
             std.mem.writeInt(u32, hdr[4..8], num_values, .little);
             hdr[8] = 0; // PLAIN encoding
-            _ = try self.file.write(&hdr);
-            _ = try self.file.write(col.data);
+            try self.file.writeAll(&hdr);
+            try self.file.writeAll(col.data);
         }
 
         // Track for footer (simplified: just record columns.len)
@@ -91,7 +91,7 @@ pub const ParquetWriter = struct {
         }
 
         // Write footer: schema info (simplified) + row group metadata
-        var footer: std.ArrayList(u8) = .{};
+        var footer: std.ArrayList(u8) = .empty;
         defer footer.deinit(self.allocator);
 
         // Write number of schema columns (4 bytes LE)
@@ -115,15 +115,15 @@ pub const ParquetWriter = struct {
         const footer_bytes = footer.items;
         const footer_len = @as(u32, @intCast(footer_bytes.len));
 
-        _ = try self.file.write(footer_bytes);
+        try self.file.writeAll(footer_bytes);
 
         // Write footer length as 4 bytes LE
         var footer_len_bytes: [4]u8 = undefined;
         std.mem.writeInt(u32, &footer_len_bytes, footer_len, .little);
-        _ = try self.file.write(&footer_len_bytes);
+        try self.file.writeAll(&footer_len_bytes);
 
         // Write PAR1 magic at end
-        _ = try self.file.write(MAGIC);
+        try self.file.writeAll(MAGIC);
     }
 
     fn columnWidth(pt: ParquetType) usize {

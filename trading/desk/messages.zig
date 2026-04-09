@@ -91,6 +91,37 @@ pub const CandleUpdate = struct {
     timestamp: u64,
 };
 
+pub const TradeUpdate = struct {
+    instrument: InstrumentId,
+    side: u8, // 0=buy, 1=sell
+    quantity: i64,
+    price: i64,
+    tick: u64,
+    trader_tag: [8]u8, // e.g. "MM", "MOM", "MEAN", "NOISE", "WHALE"
+    trader_tag_len: u8,
+};
+
+/// A single price level within a volume footprint candle.
+pub const FootprintLevel = struct {
+    price: i64,
+    bid_volume: i64, // volume hitting the bid (sellers / market sells)
+    ask_volume: i64, // volume lifting the ask (buyers / market buys)
+};
+
+/// Volume footprint data for one completed candle bar.
+/// Shows bid vs ask volume at each price level within the bar's range.
+pub const FootprintUpdate = struct {
+    instrument: InstrumentId,
+    timestamp: u64,
+    levels: [MAX_FOOTPRINT_LEVELS]FootprintLevel,
+    level_count: u8,
+    delta: i64, // total ask_volume - total bid_volume
+    total_volume: i64,
+    tick_size: i64, // price bucketing granularity
+};
+
+pub const MAX_FOOTPRINT_LEVELS: usize = 24;
+
 pub const EngineEvent = union(enum) {
     tick: u64,
     orderbook_snapshot: OrderbookSnapshot,
@@ -98,6 +129,8 @@ pub const EngineEvent = union(enum) {
     order_update: OrderUpdate,
     status: StatusUpdate,
     candle_update: CandleUpdate,
+    trade_update: TradeUpdate,
+    footprint_update: FootprintUpdate,
     shutdown_ack: void,
     tca_report: TcaReportEvent,
     eod_report: EodReportEvent,

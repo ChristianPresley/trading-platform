@@ -49,7 +49,7 @@ pub const TlsClient = struct {
 
     pub fn init(allocator: std.mem.Allocator, hostname: []const u8) !TlsClient {
         var client_random: [32]u8 = undefined;
-        std.crypto.random.bytes(&client_random);
+        _ = std.os.linux.getrandom(&client_random, client_random.len, 0);
         return TlsClient{
             .allocator = allocator,
             .hostname = hostname,

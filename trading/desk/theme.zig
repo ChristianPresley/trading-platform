@@ -27,6 +27,11 @@ pub const Theme = struct {
     indicator_line: Rgb,
     crosshair: Rgb,
     grid: Rgb,
+    footprint_bid: Rgb,
+    footprint_ask: Rgb,
+    footprint_imbalance: Rgb,
+    footprint_delta_pos: Rgb,
+    footprint_delta_neg: Rgb,
 };
 
 /// Dark theme: green bid, red ask, gray border, white text.
@@ -48,6 +53,11 @@ pub const dark = Theme{
     .indicator_line = .{ .r = 0xFF, .g = 0xAB, .b = 0x00 }, // #FFAB00 amber
     .crosshair = .{ .r = 0xAA, .g = 0xAA, .b = 0xAA }, // #AAAAAA light gray
     .grid = .{ .r = 0x30, .g = 0x30, .b = 0x30 }, // #303030 dark gray
+    .footprint_bid = .{ .r = 0xEF, .g = 0x53, .b = 0x50 }, // #EF5350 red
+    .footprint_ask = .{ .r = 0x26, .g = 0xA6, .b = 0x9A }, // #26A69A teal
+    .footprint_imbalance = .{ .r = 0xFF, .g = 0xD7, .b = 0x40 }, // #FFD740 amber
+    .footprint_delta_pos = .{ .r = 0x00, .g = 0xC8, .b = 0x53 }, // #00C853 green
+    .footprint_delta_neg = .{ .r = 0xFF, .g = 0x17, .b = 0x44 }, // #FF1744 red
 };
 
 /// Light theme: dark green bid, dark red ask, light gray border, black text.
@@ -69,6 +79,11 @@ pub const light = Theme{
     .indicator_line = .{ .r = 0xE6, .g = 0x8A, .b = 0x00 }, // #E68A00 dark amber
     .crosshair = .{ .r = 0x61, .g = 0x61, .b = 0x61 }, // #616161 medium gray
     .grid = .{ .r = 0xE0, .g = 0xE0, .b = 0xE0 }, // #E0E0E0 light gray
+    .footprint_bid = .{ .r = 0xC6, .g = 0x28, .b = 0x28 }, // #C62828 dark red
+    .footprint_ask = .{ .r = 0x00, .g = 0x79, .b = 0x5E }, // #00795E dark teal
+    .footprint_imbalance = .{ .r = 0xFF, .g = 0x8F, .b = 0x00 }, // #FF8F00 amber
+    .footprint_delta_pos = .{ .r = 0x00, .g = 0x7E, .b = 0x33 }, // #007E33 dark green
+    .footprint_delta_neg = .{ .r = 0xCC, .g = 0x00, .b = 0x00 }, // #CC0000 dark red
 };
 
 /// Classic green terminal theme: phosphor-green palette.
@@ -90,6 +105,11 @@ pub const classic_green = Theme{
     .indicator_line = .{ .r = 0x00, .g = 0xDD, .b = 0x00 }, // #00DD00 medium green
     .crosshair = .{ .r = 0x00, .g = 0x99, .b = 0x00 }, // #009900 green
     .grid = .{ .r = 0x00, .g = 0x33, .b = 0x00 }, // #003300 very dim green
+    .footprint_bid = .{ .r = 0x00, .g = 0x88, .b = 0x00 }, // #008800 dark green
+    .footprint_ask = .{ .r = 0x00, .g = 0xFF, .b = 0x00 }, // #00FF00 bright green
+    .footprint_imbalance = .{ .r = 0x00, .g = 0xDD, .b = 0x00 }, // #00DD00 medium green
+    .footprint_delta_pos = .{ .r = 0x00, .g = 0xFF, .b = 0x00 }, // #00FF00 bright green
+    .footprint_delta_neg = .{ .r = 0x00, .g = 0x66, .b = 0x00 }, // #006600 dim green
 };
 
 test "theme_field_access" {

@@ -1,0 +1,6 @@
+[2026-04-04T20:50:21+00:00] report.zig:all_functions -> tested 
+report.zig: 4/4 functions tested (percentage, classifyModule, printBar, printReport) — 17 tests pass
+[2026-04-04T20:53:58+00:00] coverage.zig:all_functions -> tested 
+coverage.zig: 5/5 functions tested (deinit, readCoveredPcsFromFile, readAllCoveredPcs, aggregateByFile, collectCoverage) — 16 tests pass
+[2026-04-04T20:54:39+00:00] main.zig:all_functions -> tested 
+main.zig: 2/3 functions tested (findTestBinaries, runTestBinaryForCoverage) — 7 tests pass

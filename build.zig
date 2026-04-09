@@ -725,6 +725,25 @@ pub fn build(b: *std.Build) void {
     });
     ws_frame_tests.root_module.addImport("frame", ws_frame_mod);
 
+    // WebSocket client module
+    const ws_client_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/protocol/websocket/client.zig"),
+    });
+    ws_client_mod.addImport("frame", ws_frame_mod);
+
+    // WebSocket client tests
+    const ws_client_tests_mod = b.createModule(.{
+        .root_source_file = b.path("sdk/protocol/websocket/tests/ws_client_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const ws_client_tests = b.addTest(.{
+        .name = "ws_client_test",
+        .root_module = ws_client_tests_mod,
+    });
+    ws_client_tests.root_module.addImport("ws_client", ws_client_mod);
+    ws_client_tests.root_module.addImport("frame", ws_frame_mod);
+
     // Kraken spot auth module
     const spot_auth_mod = b.createModule(.{
         .root_source_file = b.path("exchanges/kraken/spot/auth.zig"),
@@ -831,18 +850,21 @@ pub fn build(b: *std.Build) void {
     kraken_futures_auth_tests.root_module.addImport("hmac", hmac_mod);
 
     const run_ws_frame_tests = b.addRunArtifact(ws_frame_tests);
+    const run_ws_client_tests = b.addRunArtifact(ws_client_tests);
     const run_kraken_spot_auth_tests = b.addRunArtifact(kraken_spot_auth_tests);
     const run_kraken_spot_rate_limiter_tests = b.addRunArtifact(kraken_spot_rate_limiter_tests);
     const run_kraken_spot_rest_tests = b.addRunArtifact(kraken_spot_rest_tests);
     const run_kraken_futures_auth_tests = b.addRunArtifact(kraken_futures_auth_tests);
 
     test_step.dependOn(&run_ws_frame_tests.step);
+    test_step.dependOn(&run_ws_client_tests.step);
     test_step.dependOn(&run_kraken_spot_auth_tests.step);
     test_step.dependOn(&run_kraken_spot_rate_limiter_tests.step);
     test_step.dependOn(&run_kraken_spot_rest_tests.step);
     test_step.dependOn(&run_kraken_futures_auth_tests.step);
 
     test_ws_step.dependOn(&run_ws_frame_tests.step);
+    test_ws_step.dependOn(&run_ws_client_tests.step);
 
     test_kraken_step.dependOn(&run_kraken_spot_auth_tests.step);
     test_kraken_step.dependOn(&run_kraken_spot_rate_limiter_tests.step);
@@ -1227,6 +1249,287 @@ pub fn build(b: *std.Build) void {
     b.step("run-desk", "Run desk (alias for run-desk-tui)").dependOn(run_desk_tui_step);
     b.step("test-desk", "Run desk tests (alias for test-desk-tui)").dependOn(test_desk_tui_step);
 
+    // fake_traders tests
+    const fake_traders_mod = b.createModule(.{
+        .root_source_file = b.path("trading/desk/fake_traders.zig"),
+    });
+    fake_traders_mod.addImport("orderbook", orderbook_mod);
+    const fake_traders_tests_mod = b.createModule(.{
+        .root_source_file = b.path("trading/desk/tests/fake_traders_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    fake_traders_tests_mod.addImport("fake_traders", fake_traders_mod);
+    fake_traders_tests_mod.addImport("orderbook", orderbook_mod);
+    const fake_traders_tests = b.addTest(.{
+        .name = "fake_traders_test",
+        .root_module = fake_traders_tests_mod,
+    });
+    const run_fake_traders_tests = b.addRunArtifact(fake_traders_tests);
+    const test_fake_traders_step = b.step("test-fake-traders", "Run fake traders tests");
+    test_fake_traders_step.dependOn(&run_fake_traders_tests.step);
+    test_step.dependOn(&run_fake_traders_tests.step);
+
+    // messages tests
+    const messages_mod = b.createModule(.{
+        .root_source_file = b.path("trading/desk/messages.zig"),
+    });
+    const messages_tests_mod = b.createModule(.{
+        .root_source_file = b.path("trading/desk/tests/messages_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    messages_tests_mod.addImport("messages", messages_mod);
+    const messages_tests = b.addTest(.{
+        .name = "messages_test",
+        .root_module = messages_tests_mod,
+    });
+    const run_messages_tests = b.addRunArtifact(messages_tests);
+    const test_messages_step = b.step("test-messages", "Run messages tests");
+    test_messages_step.dependOn(&run_messages_tests.step);
+    test_step.dependOn(&run_messages_tests.step);
+
+    // theme tests
+    const theme_mod = b.createModule(.{
+        .root_source_file = b.path("trading/desk/theme.zig"),
+    });
+    const theme_tests_mod = b.createModule(.{
+        .root_source_file = b.path("trading/desk/tests/theme_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    theme_tests_mod.addImport("theme", theme_mod);
+    const theme_tests = b.addTest(.{
+        .name = "theme_test",
+        .root_module = theme_tests_mod,
+    });
+    const run_theme_tests = b.addRunArtifact(theme_tests);
+    const test_theme_step = b.step("test-theme", "Run theme tests");
+    test_theme_step.dependOn(&run_theme_tests.step);
+    test_step.dependOn(&run_theme_tests.step);
+
+    // terminal tests
+    const terminal_mod_build = b.createModule(.{
+        .root_source_file = b.path("trading/desk/terminal.zig"),
+    });
+    const terminal_tests_mod = b.createModule(.{
+        .root_source_file = b.path("trading/desk/tests/terminal_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    terminal_tests_mod.addImport("terminal", terminal_mod_build);
+    const terminal_tests = b.addTest(.{
+        .name = "terminal_test",
+        .root_module = terminal_tests_mod,
+    });
+    const run_terminal_tests = b.addRunArtifact(terminal_tests);
+    const test_terminal_step = b.step("test-terminal", "Run terminal tests");
+    test_terminal_step.dependOn(&run_terminal_tests.step);
+    test_step.dependOn(&run_terminal_tests.step);
+
+    // input tests
+    const input_mod_build = b.createModule(.{
+        .root_source_file = b.path("trading/desk/input.zig"),
+    });
+    const input_tests_mod = b.createModule(.{
+        .root_source_file = b.path("trading/desk/tests/input_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    input_tests_mod.addImport("input", input_mod_build);
+    const input_tests = b.addTest(.{
+        .name = "input_test",
+        .root_module = input_tests_mod,
+    });
+    const run_input_tests = b.addRunArtifact(input_tests);
+    const test_input_step = b.step("test-input", "Run input handler tests");
+    test_input_step.dependOn(&run_input_tests.step);
+    test_step.dependOn(&run_input_tests.step);
+
+    // renderer tests
+    // renderer.zig imports layout.zig, terminal.zig, theme.zig by relative path,
+    // so we only provide a single "renderer" module. The test file re-imports
+    // layout and theme types through the renderer module's re-exports.
+    const renderer_tests_mod = b.createModule(.{
+        .root_source_file = b.path("trading/desk/tests/renderer_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    renderer_tests_mod.addAnonymousImport("renderer", .{
+        .root_source_file = b.path("trading/desk/renderer.zig"),
+    });
+    const renderer_tests = b.addTest(.{
+        .name = "renderer_test",
+        .root_module = renderer_tests_mod,
+    });
+    const run_renderer_tests = b.addRunArtifact(renderer_tests);
+    const test_renderer_step = b.step("test-renderer", "Run renderer tests");
+    test_renderer_step.dependOn(&run_renderer_tests.step);
+    test_step.dependOn(&run_renderer_tests.step);
+
+
+    // engine tests
+    const engine_build_mod = b.createModule(.{
+        .root_source_file = b.path("trading/desk/engine.zig"),
+    });
+    engine_build_mod.addImport("orderbook", orderbook_mod);
+    engine_build_mod.addImport("oms", oms_mod);
+    engine_build_mod.addImport("order_types", order_types_mod);
+    engine_build_mod.addImport("positions", positions_mod);
+    engine_build_mod.addImport("pre_trade", pre_trade_mod);
+    engine_build_mod.addImport("ring_buffer", ring_buffer_mod);
+    engine_build_mod.addImport("bar_aggregator", bar_aggregator_mod);
+    engine_build_mod.addImport("basis", basis_desk_mod);
+    engine_build_mod.addImport("funding_arb", funding_arb_desk_mod);
+    engine_build_mod.addImport("twap", twap_mod);
+    engine_build_mod.addImport("vpin", vpin_mod);
+    engine_build_mod.addImport("tca", tca_mod);
+    engine_build_mod.addImport("eod", eod_mod);
+    engine_build_mod.addImport("reconciliation", reconciliation_mod);
+
+    const engine_tests_mod = b.createModule(.{
+        .root_source_file = b.path("trading/desk/tests/engine_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    engine_tests_mod.addImport("engine", engine_build_mod);
+    engine_tests_mod.addImport("orderbook", orderbook_mod);
+    engine_tests_mod.addImport("oms", oms_mod);
+    engine_tests_mod.addImport("positions", positions_mod);
+    engine_tests_mod.addImport("ring_buffer", ring_buffer_mod);
+    const engine_tests = b.addTest(.{
+        .name = "engine_test",
+        .root_module = engine_tests_mod,
+    });
+    const run_engine_tests = b.addRunArtifact(engine_tests);
+    const test_engine_step = b.step("test-engine", "Run engine tests");
+    test_engine_step.dependOn(&run_engine_tests.step);
+    test_step.dependOn(&run_engine_tests.step);
+
+    // ---- Panel tests: chart, chart_primitives, orderbook, order_entry ----
+    // Desk-level modules shared by panels (panels use @import("../foo.zig"))
+    const desk_terminal_p = b.createModule(.{ .root_source_file = b.path("trading/desk/terminal.zig") });
+    const desk_layout_p = b.createModule(.{ .root_source_file = b.path("trading/desk/layout.zig") });
+    desk_layout_p.addImport("terminal.zig", desk_terminal_p);
+    const desk_messages_p = b.createModule(.{ .root_source_file = b.path("trading/desk/messages.zig") });
+    const desk_theme_p = b.createModule(.{ .root_source_file = b.path("trading/desk/theme.zig") });
+    const desk_input_p = b.createModule(.{ .root_source_file = b.path("trading/desk/input.zig") });
+    const desk_renderer_p = b.createModule(.{ .root_source_file = b.path("trading/desk/renderer.zig") });
+    desk_renderer_p.addImport("terminal.zig", desk_terminal_p);
+    desk_renderer_p.addImport("layout.zig", desk_layout_p);
+    desk_renderer_p.addImport("theme.zig", desk_theme_p);
+    const chart_primitives_panel_mod = b.createModule(.{ .root_source_file = b.path("trading/desk/panels/chart_primitives.zig") });
+    chart_primitives_panel_mod.addImport("../theme.zig", desk_theme_p);
+    chart_primitives_panel_mod.addImport("../messages.zig", desk_messages_p);
+    const chart_panel_mod = b.createModule(.{ .root_source_file = b.path("trading/desk/panels/chart_panel.zig") });
+    chart_panel_mod.addImport("../renderer.zig", desk_renderer_p);
+    chart_panel_mod.addImport("../layout.zig", desk_layout_p);
+    chart_panel_mod.addImport("../messages.zig", desk_messages_p);
+    chart_panel_mod.addImport("../theme.zig", desk_theme_p);
+    chart_panel_mod.addImport("chart_primitives.zig", chart_primitives_panel_mod);
+    const orderbook_panel_build_mod = b.createModule(.{ .root_source_file = b.path("trading/desk/panels/orderbook_panel.zig") });
+    orderbook_panel_build_mod.addImport("../renderer.zig", desk_renderer_p);
+    orderbook_panel_build_mod.addImport("../layout.zig", desk_layout_p);
+    orderbook_panel_build_mod.addImport("../messages.zig", desk_messages_p);
+    orderbook_panel_build_mod.addImport("../theme.zig", desk_theme_p);
+    const order_entry_panel_build_mod = b.createModule(.{ .root_source_file = b.path("trading/desk/panels/order_entry_panel.zig") });
+    order_entry_panel_build_mod.addImport("../renderer.zig", desk_renderer_p);
+    order_entry_panel_build_mod.addImport("../layout.zig", desk_layout_p);
+    order_entry_panel_build_mod.addImport("../messages.zig", desk_messages_p);
+    order_entry_panel_build_mod.addImport("../theme.zig", desk_theme_p);
+    order_entry_panel_build_mod.addImport("../input.zig", desk_input_p);
+    const chart_panel_tests_mod = b.createModule(.{ .root_source_file = b.path("trading/desk/panels/tests/chart_panel_test.zig"), .target = target, .optimize = optimize });
+    chart_panel_tests_mod.addImport("chart_panel", chart_panel_mod);
+    const chart_panel_tests = b.addTest(.{ .name = "chart_panel_test", .root_module = chart_panel_tests_mod });
+    const run_chart_panel_tests = b.addRunArtifact(chart_panel_tests);
+    test_step.dependOn(&run_chart_panel_tests.step);
+    const chart_primitives_tests_mod = b.createModule(.{ .root_source_file = b.path("trading/desk/panels/tests/chart_primitives_test.zig"), .target = target, .optimize = optimize });
+    chart_primitives_tests_mod.addImport("chart_primitives", chart_primitives_panel_mod);
+    const chart_primitives_tests = b.addTest(.{ .name = "chart_primitives_test", .root_module = chart_primitives_tests_mod });
+    const run_chart_primitives_tests = b.addRunArtifact(chart_primitives_tests);
+    test_step.dependOn(&run_chart_primitives_tests.step);
+    const orderbook_panel_tests_mod = b.createModule(.{ .root_source_file = b.path("trading/desk/panels/tests/orderbook_panel_test.zig"), .target = target, .optimize = optimize });
+    orderbook_panel_tests_mod.addImport("orderbook_panel", orderbook_panel_build_mod);
+    const orderbook_panel_tests = b.addTest(.{ .name = "orderbook_panel_test", .root_module = orderbook_panel_tests_mod });
+    const run_orderbook_panel_tests = b.addRunArtifact(orderbook_panel_tests);
+    test_step.dependOn(&run_orderbook_panel_tests.step);
+    const order_entry_panel_tests_mod = b.createModule(.{ .root_source_file = b.path("trading/desk/panels/tests/order_entry_panel_test.zig"), .target = target, .optimize = optimize });
+    order_entry_panel_tests_mod.addImport("order_entry_panel", order_entry_panel_build_mod);
+    const order_entry_panel_tests = b.addTest(.{ .name = "order_entry_panel_test", .root_module = order_entry_panel_tests_mod });
+    const run_order_entry_panel_tests = b.addRunArtifact(order_entry_panel_tests);
+    test_step.dependOn(&run_order_entry_panel_tests.step);
+    const test_panels_step = b.step("test-panels", "Run all TUI panel tests");
+    test_panels_step.dependOn(&run_chart_panel_tests.step);
+    test_panels_step.dependOn(&run_chart_primitives_tests.step);
+    test_panels_step.dependOn(&run_orderbook_panel_tests.step);
+    test_panels_step.dependOn(&run_order_entry_panel_tests.step);
+
+    // ---- Layout, orders, positions, status, trade_tape panel tests ----
+
+    const layout_mod_build = b.createModule(.{ .root_source_file = b.path("trading/desk/layout.zig") });
+    const orders_panel_mod = b.createModule(.{ .root_source_file = b.path("trading/desk/panels/orders_panel.zig") });
+    orders_panel_mod.addImport("../renderer.zig", desk_renderer_p);
+    orders_panel_mod.addImport("../layout.zig", desk_layout_p);
+    orders_panel_mod.addImport("../messages.zig", desk_messages_p);
+    orders_panel_mod.addImport("../theme.zig", desk_theme_p);
+    const trade_tape_panel_mod = b.createModule(.{ .root_source_file = b.path("trading/desk/panels/trade_tape_panel.zig") });
+    trade_tape_panel_mod.addImport("../renderer.zig", desk_renderer_p);
+    trade_tape_panel_mod.addImport("../layout.zig", desk_layout_p);
+    trade_tape_panel_mod.addImport("../messages.zig", desk_messages_p);
+    trade_tape_panel_mod.addImport("../theme.zig", desk_theme_p);
+
+    // layout tests
+    const layout_tests_mod = b.createModule(.{ .root_source_file = b.path("trading/desk/tests/layout_test.zig"), .target = target, .optimize = optimize });
+    layout_tests_mod.addImport("layout", layout_mod_build);
+    const layout_tests = b.addTest(.{ .name = "layout_test", .root_module = layout_tests_mod });
+    const run_layout_tests = b.addRunArtifact(layout_tests);
+    const test_layout_step = b.step("test-layout", "Run layout tests");
+    test_layout_step.dependOn(&run_layout_tests.step);
+    test_step.dependOn(&run_layout_tests.step);
+    test_panels_step.dependOn(&run_layout_tests.step);
+
+    // orders_panel tests
+    const orders_panel_tests_mod = b.createModule(.{ .root_source_file = b.path("trading/desk/panels/tests/orders_panel_test.zig"), .target = target, .optimize = optimize });
+    orders_panel_tests_mod.addImport("orders_panel", orders_panel_mod);
+    const orders_panel_tests = b.addTest(.{ .name = "orders_panel_test", .root_module = orders_panel_tests_mod });
+    const run_orders_panel_tests = b.addRunArtifact(orders_panel_tests);
+    const test_orders_panel_step = b.step("test-orders-panel", "Run orders panel tests");
+    test_orders_panel_step.dependOn(&run_orders_panel_tests.step);
+    test_step.dependOn(&run_orders_panel_tests.step);
+    test_panels_step.dependOn(&run_orders_panel_tests.step);
+
+    // positions_panel tests
+    const positions_panel_tests_mod = b.createModule(.{ .root_source_file = b.path("trading/desk/panels/tests/positions_panel_test.zig"), .target = target, .optimize = optimize });
+    positions_panel_tests_mod.addImport("layout", layout_mod_build);
+    positions_panel_tests_mod.addImport("messages", messages_mod);
+    const positions_panel_tests = b.addTest(.{ .name = "positions_panel_test", .root_module = positions_panel_tests_mod });
+    const run_positions_panel_tests = b.addRunArtifact(positions_panel_tests);
+    const test_positions_panel_step = b.step("test-positions-panel", "Run positions panel tests");
+    test_positions_panel_step.dependOn(&run_positions_panel_tests.step);
+    test_step.dependOn(&run_positions_panel_tests.step);
+    test_panels_step.dependOn(&run_positions_panel_tests.step);
+
+    // status_panel tests
+    const status_panel_tests_mod = b.createModule(.{ .root_source_file = b.path("trading/desk/panels/tests/status_panel_test.zig"), .target = target, .optimize = optimize });
+    status_panel_tests_mod.addImport("messages", messages_mod);
+    status_panel_tests_mod.addImport("theme", theme_mod);
+    const status_panel_tests = b.addTest(.{ .name = "status_panel_test", .root_module = status_panel_tests_mod });
+    const run_status_panel_tests = b.addRunArtifact(status_panel_tests);
+    const test_status_panel_step = b.step("test-status-panel", "Run status panel tests");
+    test_status_panel_step.dependOn(&run_status_panel_tests.step);
+    test_step.dependOn(&run_status_panel_tests.step);
+    test_panels_step.dependOn(&run_status_panel_tests.step);
+
+    // trade_tape_panel tests
+    const trade_tape_panel_tests_mod = b.createModule(.{ .root_source_file = b.path("trading/desk/panels/tests/trade_tape_panel_test.zig"), .target = target, .optimize = optimize });
+    trade_tape_panel_tests_mod.addImport("trade_tape_panel", trade_tape_panel_mod);
+    const trade_tape_panel_tests = b.addTest(.{ .name = "trade_tape_panel_test", .root_module = trade_tape_panel_tests_mod });
+    const run_trade_tape_panel_tests = b.addRunArtifact(trade_tape_panel_tests);
+    const test_trade_tape_panel_step = b.step("test-trade-tape-panel", "Run trade tape panel tests");
+    test_trade_tape_panel_step.dependOn(&run_trade_tape_panel_tests.step);
+    test_step.dependOn(&run_trade_tape_panel_tests.step);
+    test_panels_step.dependOn(&run_trade_tape_panel_tests.step);
+
     // ---- Trading Desk Headless ----
     // Headless executable: engine without terminal dependency, push/pop API.
 
@@ -1315,4 +1618,50 @@ pub fn build(b: *std.Build) void {
     if (b.args) |run_args| zcov_run.addArgs(run_args);
     const zcov_step = b.step("zcov", "Run coverage analysis (compiles + runs tests with -ffuzz, reports line coverage)");
     zcov_step.dependOn(&zcov_run.step);
+
+    // zcov tests: unit tests for the coverage harness itself
+    const test_zcov_step = b.step("test-zcov", "Run zcov harness tests");
+
+    // report.zig tests (inline test blocks)
+    const zcov_report_tests_mod = b.createModule(.{
+        .root_source_file = b.path("test/zcov/report.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const zcov_report_tests = b.addTest(.{
+        .name = "zcov_report_test",
+        .root_module = zcov_report_tests_mod,
+    });
+    const run_zcov_report_tests = b.addRunArtifact(zcov_report_tests);
+    test_zcov_step.dependOn(&run_zcov_report_tests.step);
+
+    // coverage.zig tests (inline test blocks)
+    const zcov_coverage_tests_mod = b.createModule(.{
+        .root_source_file = b.path("test/zcov/coverage.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const zcov_coverage_tests = b.addTest(.{
+        .name = "zcov_coverage_test",
+        .root_module = zcov_coverage_tests_mod,
+    });
+    const run_zcov_coverage_tests = b.addRunArtifact(zcov_coverage_tests);
+    test_zcov_step.dependOn(&run_zcov_coverage_tests.step);
+
+    // main.zig tests (inline test blocks)
+    const zcov_main_tests_mod = b.createModule(.{
+        .root_source_file = b.path("test/zcov/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const zcov_main_tests = b.addTest(.{
+        .name = "zcov_main_test",
+        .root_module = zcov_main_tests_mod,
+    });
+    const run_zcov_main_tests = b.addRunArtifact(zcov_main_tests);
+    test_zcov_step.dependOn(&run_zcov_main_tests.step);
+
+    test_step.dependOn(&run_zcov_report_tests.step);
+    test_step.dependOn(&run_zcov_coverage_tests.step);
+    test_step.dependOn(&run_zcov_main_tests.step);
 }

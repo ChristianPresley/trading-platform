@@ -286,6 +286,29 @@ pub const OrderManager = struct {
         return self.orders.getPtr(id);
     }
 
+    /// Remove orders in terminal states (filled, cancelled, rejected, expired, replaced)
+    /// to prevent unbounded HashMap growth.
+    pub fn purgeTerminal(self: *OrderManager) void {
+        // Collect keys to remove (can't remove during iteration)
+        var remove_buf: [256]OrderId = undefined;
+        var remove_count: usize = 0;
+        var it = self.orders.iterator();
+        while (it.next()) |entry| {
+            switch (entry.value_ptr.status) {
+                .filled, .cancelled, .rejected, .expired, .replaced => {
+                    if (remove_count < remove_buf.len) {
+                        remove_buf[remove_count] = entry.key_ptr.*;
+                        remove_count += 1;
+                    }
+                },
+                else => {},
+            }
+        }
+        for (remove_buf[0..remove_count]) |id| {
+            _ = self.orders.remove(id);
+        }
+    }
+
     pub fn deinit(self: *OrderManager) void {
         self.orders.deinit();
     }

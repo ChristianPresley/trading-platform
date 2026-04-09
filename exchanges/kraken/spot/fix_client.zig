@@ -93,8 +93,11 @@ pub const KrakenFixClient = struct {
     /// Nonce must be within 5s of Kraken server time.
     pub fn logon(self: *KrakenFixClient) !void {
         // Build sending time as nonce (UTC timestamp)
-        const ts_ns = std.time.nanoTimestamp();
-        const ts_s = @divTrunc(ts_ns, std.time.ns_per_s);
+        const ts_s = blk: {
+            var ts_: std.os.linux.timespec = undefined;
+            _ = std.os.linux.clock_gettime(.REALTIME, &ts_);
+            break :blk ts_.sec;
+        };
         var nonce_buf: [32]u8 = undefined;
         const nonce = try std.fmt.bufPrint(&nonce_buf, "{}", .{ts_s});
 

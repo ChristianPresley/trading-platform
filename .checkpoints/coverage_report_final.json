@@ -1,0 +1,73 @@
+{
+  "timestamp": "2026-04-04T20:55:26.819342",
+  "overall_pct": 70.5,
+  "target_pct": 70,
+  "status": "PASS",
+  "files": {
+    "report.zig": {
+      "coverage_pct": 93.2,
+      "functions": {
+        "ModuleSummary.percentage": {
+          "status": "tested",
+          "tests": 4
+        },
+        "classifyModule": {
+          "status": "tested",
+          "tests": 4
+        },
+        "printBar": {
+          "status": "tested",
+          "tests": 4
+        },
+        "printReport": {
+          "status": "tested",
+          "tests": 5
+        }
+      }
+    },
+    "coverage.zig": {
+      "coverage_pct": 91.2,
+      "functions": {
+        "CoverageData.deinit": {
+          "status": "tested",
+          "tests": 1
+        },
+        "collectCoverage": {
+          "status": "tested",
+          "tests": 1
+        },
+        "readCoveredPcsFromFile": {
+          "status": "tested",
+          "tests": 6
+        },
+        "readAllCoveredPcs": {
+          "status": "tested",
+          "tests": 4
+        },
+        "aggregateByFile": {
+          "status": "tested",
+          "tests": 4
+        }
+      }
+    },
+    "main.zig": {
+      "coverage_pct": 34.2,
+      "functions": {
+        "main": {
+          "status": "not_tested",
+          "tests": 0,
+          "reason": "orchestration fn, spawns processes"
+        },
+        "findTestBinaries": {
+          "status": "tested",
+          "tests": 5
+        },
+        "runTestBinaryForCoverage": {
+          "status": "tested",
+          "tests": 2
+        }
+      }
+    }
+  },
+  "total_tests": 40
+}
